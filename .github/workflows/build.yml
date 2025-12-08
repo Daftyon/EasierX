@@ -84,21 +84,7 @@ jobs:
           --hidden-import=xml.etree.ElementTree \
           main_tkinter.py
 
-    - name: Build with PyInstaller (macOS)
-      if: runner.os == 'macOS'
-      run: |
-        pyinstaller --name=BatcherMan \
-          --onefile \
-          --windowed \
-          --icon=resources/icon.icns \
-          --add-data "resources:resources" \
-          --add-data "core:core" \
-          --hidden-import=jpype \
-          --hidden-import=jpype._jvmfinder \
-          --hidden-import=tkinter \
-          --hidden-import=xml.etree.ElementTree \
-          --osx-bundle-identifier=com.synthos.batcherman \
-          main_tkinter.py
+
 
     - name: Create distributable package (Windows)
       if: runner.os == 'Windows'
