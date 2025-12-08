@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [windows-latest, ubuntu-latest]
         python-version: ['3.11']
         include:
           - os: windows-latest
@@ -112,30 +112,6 @@ jobs:
         Note: Requires Java 17+ to be installed
         EOF
         cd dist && tar -czf BatcherMan-Linux.tar.gz BatcherMan-Linux/
-
-    - name: Create distributable package (macOS)
-      if: runner.os == 'macOS'
-      run: |
-        mkdir -p dist/BatcherMan-macOS
-        cp -r dist/BatcherMan.app dist/BatcherMan-macOS/
-        cat > dist/BatcherMan-macOS/README.txt << EOF
-        # BatcherMan Desktop
-        Spring Batch Testing & Debugging Tool
-        
-        Double-click BatcherMan.app to start
-        
-        Note: Requires Java 17+ to be installed
-        If macOS blocks the app, go to System Preferences > Security & Privacy
-        EOF
-        cd dist && zip -r BatcherMan-macOS.zip BatcherMan-macOS/
-
-    - name: Upload artifact (Windows)
-      if: runner.os == 'Windows'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.artifact_name }}
-        path: dist/BatcherMan-Windows.zip
-        retention-days: 30
 
     - name: Upload artifact (Linux)
       if: runner.os == 'Linux'
