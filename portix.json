@@ -1,0 +1,22 @@
+{
+  "servers": [
+    {
+      "host": "172.22.15.72",
+      "port": 22,
+      "username": "userdev",
+      "password": "01$Dv10sprinG",
+      "last_scan": "2025-12-10 13:16:46",
+      "last_scan_success": true
+    },
+    {
+      "host": "172.22.15.154",
+      "port": 22,
+      "username": "batchuser",
+      "password": "etude$1819",
+      "last_scan": "2025-12-10 13:16:46",
+      "last_scan_success": true
+    }
+  ],
+  "custom_services": [],
+  "poll_interval": 30
+}
