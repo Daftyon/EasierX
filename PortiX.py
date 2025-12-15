@@ -300,8 +300,8 @@ def get_server_history(host, username, password=None, pkey_path=None, port=22, l
     """Get Unix command history from remote server"""
     # Try multiple methods to get history
     commands = [
+        f"cat ~/.bash_history | tail -n {lines}",  # ← MOVE THIS TO FIRST
         f"history {lines}",  # Standard history command
-        f"cat ~/.bash_history | tail -n {lines}",  # Bash history file
         f"cat ~/.zsh_history | tail -n {lines}",  # Zsh history file
     ]
     
@@ -1322,12 +1322,13 @@ class MonitorApp(ttk.Frame):
         """Handle successful history fetch"""
         host = payload['host']
         history = payload['history']
+        server_config = payload.get('server_config')  # ← ADD THIS LINE
         
         self.log(f"✅ {host} command history retrieved")
         
         # Show in dialog
-        UnixHistoryDialog(self.master, host, history)
-    
+        UnixHistoryDialog(self.master, host, history, server_config)  # ← ADD server_config
+        
     def _handle_history_error(self, payload):
         """Handle history fetch error"""
         host = payload['host']
@@ -1687,7 +1688,8 @@ Details: {vals[8]}"""
             else:
                 self.result_queue.put(('history_success', {
                     'host': host,
-                    'history': history_output
+                    'history': history_output,
+                    'server_config': server  # ← ADD THIS LINE
                 }))
                 
         except Exception as e:
@@ -2198,12 +2200,17 @@ class CustomServiceDialog:
         }
         self.top.destroy()
 
+# Add this enhanced UnixHistoryDialog class to replace the existing one in the script
+
 class UnixHistoryDialog:
-    """Dialog for viewing real Unix command history from remote server"""
-    def __init__(self, master, host, history_output):
+    """Enhanced dialog for viewing Unix command history and running commands on remote server"""
+    def __init__(self, master, host, history_output, server_config=None):
         self.top = tk.Toplevel(master)
-        self.top.title(f"Unix Command History - {host}")
-        self.top.geometry('1000x700')
+        self.top.title(f"Server Terminal - {host}")
+        self.top.geometry('1200x900')        
+        self.host = host
+        self.server_config = server_config
+        self.command_queue = queue.Queue()
         
         frm = ttk.Frame(self.top, padding=15)
         frm.pack(fill='both', expand=True)
@@ -2213,152 +2220,448 @@ class UnixHistoryDialog:
         # Header
         header = ttk.Frame(frm)
         header.grid(row=0, column=0, sticky='we', pady=(0, 10))
+        header.grid_columnconfigure(1, weight=1)
         
-        ttk.Label(header, text=f'📜 Command History: {host}', 
-                 font=('Segoe UI', 14, 'bold')).pack(side='left')
+        ttk.Label(header, text=f'🖥️  Server Terminal: {host}', 
+                 font=('Segoe UI', 14, 'bold')).grid(row=0, column=0, sticky='w')
+        
+        # Status indicator
+        self.status_label = ttk.Label(header, text='● Connected', 
+                                     font=('Segoe UI', 10, 'bold'),
+                                     foreground='#28a745')
+        self.status_label.grid(row=0, column=1, sticky='e')
         
         # Export button
         ttk.Button(header, text='💾 Export', 
-                  command=lambda: self.export_history(host, history_output)).pack(side='right', padx=5)
+                  command=lambda: self.export_history(host, history_output)).grid(
+                      row=0, column=2, padx=5)
         
-        # Text widget with scrollbar for history
-        text_frame = ttk.Frame(frm, relief='sunken', borderwidth=1)
-        text_frame.grid(row=1, column=0, sticky='nswe')
-        text_frame.grid_rowconfigure(0, weight=1)
-        text_frame.grid_columnconfigure(0, weight=1)
+        # Command history list
+        history_frame = ttk.LabelFrame(frm, text='📜 Command History (Recent 200 Commands)', 
+                                      padding=10)
+        history_frame.grid(row=1, column=0, sticky='nswe', pady=(0, 10))
+        history_frame.grid_rowconfigure(1, weight=1)
+        history_frame.grid_columnconfigure(0, weight=1)
         
-        self.text = tk.Text(text_frame, wrap='none', font=('Consolas', 10),
-                           relief='flat', borderwidth=0)
-        self.text.grid(row=0, column=0, sticky='nswe')
+        # Search bar - MOVED TO TOP OF HISTORY FRAME
+        search_frame = ttk.Frame(history_frame)
+        search_frame.grid(row=0, column=0, sticky='we', pady=(0, 10))
+        search_frame.grid_columnconfigure(1, weight=1)
+        
+        ttk.Label(search_frame, text='🔎 Search:').grid(row=0, column=0, padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', lambda *args: self.filter_history())
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
+        search_entry.grid(row=0, column=1, sticky='we', padx=2)
+        
+        ttk.Button(search_frame, text='✖ Clear', 
+                  command=lambda: self.search_var.set('')).grid(row=0, column=2, padx=2)
+        
+        # Info label
+        self.info_label = ttk.Label(search_frame, text='Tip: Double-click to run command', 
+                                    foreground='#6c757d', font=('Segoe UI', 9))
+        self.info_label.grid(row=0, column=3, padx=15)
+        
+        # Listbox for command history
+        list_container = ttk.Frame(history_frame, relief='sunken', borderwidth=1)
+        list_container.grid(row=1, column=0, sticky='nswe')
+        list_container.grid_rowconfigure(0, weight=1)
+        list_container.grid_columnconfigure(0, weight=1)
+        
+        self.history_listbox = tk.Listbox(list_container, 
+                                         font=('Consolas', 10),
+                                         selectmode='extended',
+                                         activestyle='none',
+                                         bg='#f8f9fa',
+                                         relief='flat',
+                                         height=20)  # Reduced height since we have more space
+        self.history_listbox.grid(row=0, column=0, sticky='nswe')
         
         # Scrollbars
-        vsb = ttk.Scrollbar(text_frame, orient='vertical', command=self.text.yview)
+        vsb = ttk.Scrollbar(list_container, orient='vertical', 
+                           command=self.history_listbox.yview)
         vsb.grid(row=0, column=1, sticky='ns')
-        hsb = ttk.Scrollbar(text_frame, orient='horizontal', command=self.text.xview)
-        hsb.grid(row=1, column=0, sticky='we')
-        self.text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.history_listbox.configure(yscrollcommand=vsb.set)
         
-        # Parse and display history
-        self.parse_and_display(history_output)
+        # Parse and populate history
+        self.parse_and_populate(history_output)
+        
+        # Double-click to run command
+        self.history_listbox.bind('<Double-Button-1>', self.run_selected_command)
+        
+        # Context menu for listbox
+        self.list_menu = tk.Menu(self.history_listbox, tearoff=0)
+        self.list_menu.add_command(label="▶ Run Command", command=self.run_selected_command)
+        self.list_menu.add_command(label="📋 Copy Command", command=self.copy_selected_command)
+        self.list_menu.add_separator()
+        self.list_menu.add_command(label="🔍 Filter Similar", command=self.filter_similar)
+        
+        self.history_listbox.bind('<Button-3>', self.show_list_menu)
+        
+        # Command execution section - SIMPLIFIED WITHOUT QUICK COMMANDS
+        exec_frame = ttk.LabelFrame(frm, text='⚡ Execute Commands on Server', padding=10)
+        exec_frame.grid(row=2, column=0, sticky='nswe')
+        exec_frame.grid_rowconfigure(1, weight=1)
+        exec_frame.grid_columnconfigure(0, weight=1)
+        
+        # Command input
+        cmd_input_frame = ttk.Frame(exec_frame)
+        cmd_input_frame.grid(row=0, column=0, sticky='we', pady=(0, 10))
+        cmd_input_frame.grid_columnconfigure(1, weight=1)
+        
+        ttk.Label(cmd_input_frame, text='Command:', 
+                 font=('Segoe UI', 10, 'bold')).grid(row=0, column=0, padx=(0, 5))
+        
+        self.command_var = tk.StringVar()
+        self.command_entry = ttk.Entry(cmd_input_frame, 
+                                      textvariable=self.command_var,
+                                      font=('Consolas', 11))
+        self.command_entry.grid(row=0, column=1, sticky='we', padx=5)
+        self.command_entry.bind('<Return>', lambda e: self.execute_command())
+        self.command_entry.focus()
+        
+        ttk.Button(cmd_input_frame, text='▶ Execute', 
+                  command=self.execute_command,
+                  style='Primary.TButton').grid(row=0, column=2, padx=5)
+        
+        ttk.Button(cmd_input_frame, text='📋 Paste', 
+                  command=self.paste_from_clipboard).grid(row=0, column=3, padx=2)
+        
+        # Output area
+        output_container = ttk.Frame(exec_frame)
+        output_container.grid(row=1, column=0, sticky='nswe', pady=(10, 0))
+        output_container.grid_rowconfigure(0, weight=1)
+        output_container.grid_columnconfigure(0, weight=1)
+        
+        self.output_text = tk.Text(output_container, 
+                                   font=('Consolas', 10),
+                                   bg='#0d1b2a',
+                                   fg='#00ff41',
+                                   wrap='none',
+                                   relief='sunken',
+                                   borderwidth=2,
+                                   height=12)  # Increased height since we removed quick commands
+        self.output_text.grid(row=0, column=0, sticky='nswe')
+        
+        # Scrollbars for output
+        out_vsb = ttk.Scrollbar(output_container, orient='vertical', 
+                               command=self.output_text.yview)
+        out_vsb.grid(row=0, column=1, sticky='ns')
+        out_hsb = ttk.Scrollbar(output_container, orient='horizontal',
+                               command=self.output_text.xview)
+        out_hsb.grid(row=1, column=0, sticky='we')
+        self.output_text.configure(yscrollcommand=out_vsb.set, 
+                                  xscrollcommand=out_hsb.set)
+        
+        # Initial message
+        self.log_output(f"╔{'═'*58}╗\n", '#00d4ff')
+        self.log_output(f"║  Connected to {host:48} ║\n", '#00d4ff')
+        self.log_output(f"║  Type commands to execute on remote server{' '*15}║\n", '#00d4ff')
+        self.log_output(f"╚{'═'*58}╝\n\n", '#00d4ff')
+        
+        # Output controls
+        output_ctrl = ttk.Frame(exec_frame)
+        output_ctrl.grid(row=2, column=0, sticky='we', pady=(5, 0))
+        
+        ttk.Button(output_ctrl, text='🗑️ Clear Output', 
+                  command=lambda: self.output_text.delete('1.0', 'end')).pack(side='left', padx=2)
+        ttk.Button(output_ctrl, text='💾 Save Output', 
+                  command=self.save_output).pack(side='left', padx=2)
+        ttk.Button(output_ctrl, text='📋 Copy Output', 
+                  command=self.copy_output).pack(side='left', padx=2)
         
         # Stats
-        lines = history_output.strip().split('\n')
         stats_frame = ttk.Frame(frm)
-        stats_frame.grid(row=2, column=0, sticky='we', pady=(10, 0))
+        stats_frame.grid(row=3, column=0, sticky='we', pady=(10, 0))
         
-        stats_text = f"Total Commands: {len(lines)}  |  Server: {host}"
-        ttk.Label(stats_frame, text=stats_text, font=('Segoe UI', 10)).pack(side='left')
-        
-        # Search
-        search_frame = ttk.Frame(stats_frame)
-        search_frame.pack(side='right')
-        
-        ttk.Label(search_frame, text='Search:').pack(side='left', padx=5)
-        self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
-        search_entry.pack(side='left', padx=2)
-        ttk.Button(search_frame, text='Find', 
-                  command=self.find_text).pack(side='left', padx=2)
+        lines = history_output.strip().split('\n') if history_output else []
+        self.stats_label = ttk.Label(stats_frame, 
+                                     text=f"Total Commands in History: {len(lines)}  |  Server: {host}",
+                                     font=('Segoe UI', 10))
+        self.stats_label.pack(side='left')
         
         # Close button
-        ttk.Button(frm, text='Close', command=self.top.destroy, 
-                  width=15).grid(row=3, column=0, pady=(10, 0))
+        ttk.Button(stats_frame, text='Close', 
+                  command=self.top.destroy, width=15).pack(side='right')
         
         self.top.transient(master)
         self.history_output = history_output
+        self.all_commands = []
+        
+        # Start queue processor
+        self.start_queue_processor()
     
-    def parse_and_display(self, history_output):
-        """Parse and display history with syntax highlighting"""
+    def parse_and_populate(self, history_output):
+        """Parse history and populate listbox"""
+        if not history_output:
+            self.info_label.config(text='❌ No history data received from server!')
+            return
+        
         lines = history_output.strip().split('\n')
         
-        for line in lines:
-            # Try to parse history format: "  123  command"
+        self.all_commands = []
+        
+        for idx, line in enumerate(lines, 1):
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Try to parse numbered format: "  123  command"
             match = re.match(r'^\s*(\d+)\s+(.*)$', line)
             if match:
                 line_num = match.group(1)
                 command = match.group(2)
-                
-                # Insert with colors
-                self.text.insert('end', f"{line_num:>6}  ", 'line_num')
-                self.text.insert('end', command + '\n', 'command')
+                self.all_commands.append((line_num, command))
             else:
-                # Plain line
-                self.text.insert('end', line + '\n')
+                # Plain command without number - ADD OUR OWN NUMBER
+                self.all_commands.append((str(idx), line))
         
-        # Configure tags
-        self.text.tag_configure('line_num', foreground='#6c757d', font=('Consolas', 10, 'bold'))
-        self.text.tag_configure('command', foreground='#212529')
+        # Populate listbox
+        self.update_listbox_display()
         
-        # Highlight important commands
-        self.highlight_keywords()
-        
-        self.text.config(state='disabled')
+        # Update info with count
+        if self.all_commands:
+            self.info_label.config(text=f'✅ Loaded {len(self.all_commands)} commands from history')
+        else:
+            self.info_label.config(text='⚠️ History data received but no valid commands found')
     
-    def highlight_keywords(self):
-        """Highlight important Unix commands"""
-        keywords = {
-            'sudo': '#dc3545',
-            'rm': '#dc3545',
-            'kill': '#dc3545',
-            'chmod': '#ffc107',
-            'chown': '#ffc107',
-            'systemctl': '#0078d4',
-            'service': '#0078d4',
-            'docker': '#0078d4',
-            'kubectl': '#0078d4',
-            'java': '#28a745',
-            'mvn': '#28a745',
-            'gradle': '#28a745',
-        }
+    def update_listbox_display(self):
+        """Update listbox with filtered commands"""
+        self.history_listbox.delete(0, tk.END)
         
-        for keyword, color in keywords.items():
-            start = '1.0'
-            while True:
-                pos = self.text.search(r'\b' + keyword + r'\b', start, stopindex='end', regexp=True)
-                if not pos:
-                    break
-                end = f"{pos}+{len(keyword)}c"
-                tag_name = f'keyword_{keyword}'
-                self.text.tag_add(tag_name, pos, end)
-                self.text.tag_configure(tag_name, foreground=color, font=('Consolas', 10, 'bold'))
-                start = end
+        # SAFETY CHECK - search_var might not exist yet
+        try:
+            search_text = self.search_var.get().lower()
+        except AttributeError:
+            search_text = ''
+        
+        count = 0
+        
+        for line_num, command in self.all_commands:
+            if not search_text or search_text in command.lower():
+                display = f"{line_num:>6}  {command}" if line_num else f"        {command}"
+                self.history_listbox.insert(tk.END, display)
+                count += 1
+                
+                # Color code important commands
+                if any(keyword in command.lower() for keyword in ['sudo', 'rm -', 'kill ']):
+                    self.history_listbox.itemconfig(tk.END, fg='#dc3545')
+                elif any(keyword in command.lower() for keyword in ['java', 'mvn', 'gradle', 'jar']):
+                    self.history_listbox.itemconfig(tk.END, fg='#28a745')
+                elif any(keyword in command.lower() for keyword in ['docker', 'kubectl', 'systemctl', 'service']):
+                    self.history_listbox.itemconfig(tk.END, fg='#0078d4')
+        
+        # Update info label
+        if search_text:
+            self.info_label.config(text=f'Found {count} matching commands')
+        else:
+            self.info_label.config(text='Tip: Double-click to run command')
     
-    def find_text(self):
-        """Find text in history"""
-        search_text = self.search_var.get()
-        if not search_text:
+    def filter_history(self):
+        """Filter history based on search"""
+        self.update_listbox_display()
+    
+    def show_list_menu(self, event):
+        """Show context menu for listbox"""
+        # Select the item under cursor
+        index = self.history_listbox.nearest(event.y)
+        self.history_listbox.selection_clear(0, tk.END)
+        self.history_listbox.selection_set(index)
+        self.history_listbox.activate(index)
+        
+        self.list_menu.post(event.x_root, event.y_root)
+    
+    def copy_selected_command(self):
+        """Copy selected command to clipboard"""
+        selection = self.history_listbox.curselection()
+        if not selection:
             return
         
-        # Remove previous highlights
-        self.text.tag_remove('search', '1.0', 'end')
+        item = self.history_listbox.get(selection[0])
+        match = re.match(r'^\s*\d*\s*(.*)$', item)
+        if match:
+            command = match.group(1).strip()
+            self.top.clipboard_clear()
+            self.top.clipboard_append(command)
+            self.info_label.config(text='Command copied to clipboard')
+    
+    def filter_similar(self):
+        """Filter commands similar to selected"""
+        selection = self.history_listbox.curselection()
+        if not selection:
+            return
         
-        # Find and highlight
-        start = '1.0'
-        count = 0
-        while True:
-            pos = self.text.search(search_text, start, stopindex='end', nocase=True)
-            if not pos:
-                break
-            end = f"{pos}+{len(search_text)}c"
-            self.text.tag_add('search', pos, end)
-            count += 1
-            start = end
+        item = self.history_listbox.get(selection[0])
+        match = re.match(r'^\s*\d*\s*(.*)$', item)
+        if match:
+            command = match.group(1).strip()
+            # Get first word as filter
+            first_word = command.split()[0] if command.split() else ''
+            if first_word:
+                self.search_var.set(first_word)
+    
+    def run_selected_command(self, event=None):
+        """Run selected command from history"""
+        selection = self.history_listbox.curselection()
+        if not selection:
+            return
         
-        self.text.tag_configure('search', background='yellow', foreground='black')
+        # Get selected command
+        item = self.history_listbox.get(selection[0])
+        # Extract command (remove line number if present)
+        match = re.match(r'^\s*\d*\s*(.*)$', item)
+        if match:
+            command = match.group(1).strip()
+            self.command_var.set(command)
+            self.execute_command()
+    
+    def execute_command(self):
+        """Execute command on remote server"""
+        command = self.command_var.get().strip()
         
-        if count > 0:
-            # Scroll to first match
-            self.text.see('1.0')
-            messagebox.showinfo('Search', f'Found {count} occurrence(s)')
-        else:
-            messagebox.showinfo('Search', 'No matches found')
+        if not command:
+            messagebox.showwarning('Execute', 'Please enter a command', parent=self.top)
+            return
+        
+        if not self.server_config:
+            messagebox.showerror('Execute', 'No server configuration available', parent=self.top)
+            return
+        
+        # Confirm dangerous commands
+        dangerous_keywords = ['rm -rf', 'dd if=', 'mkfs', ':(){:|:&};:', 'shutdown', 'reboot', 'init 0', 'halt']
+        if any(keyword in command for keyword in dangerous_keywords):
+            if not messagebox.askyesno('⚠️  Dangerous Command', 
+                                      f'This command may be DANGEROUS:\n\n{command}\n\n'
+                                      f'It could cause data loss or system shutdown.\n\n'
+                                      f'Are you SURE you want to continue?',
+                                      parent=self.top):
+                return
+        
+        self.log_output(f"\n╭─ $ ", '#00d4ff')
+        self.log_output(f"{command}\n", '#ffffff')
+        self.log_output(f"╰─{'─'*60}\n", '#00d4ff')
+        
+        self.status_label.config(text='⏳ Executing...', foreground='#ffc107')
+        self.command_entry.config(state='disabled')
+        
+        # Execute in background thread
+        threading.Thread(target=self._execute_worker, args=(command,), daemon=True).start()
+    
+    def _execute_worker(self, command):
+        """Worker thread to execute command"""
+        try:
+            out, err = ssh_run(
+                self.server_config['host'],
+                self.server_config['username'],
+                password=self.server_config.get('password'),
+                pkey_path=self.server_config.get('pkey'),
+                port=self.server_config.get('port', 22),
+                cmd=command,
+                timeout=30
+            )
+            
+            self.command_queue.put(('success', {'output': out, 'error': err}))
+            
+        except Exception as e:
+            self.command_queue.put(('error', str(e)))
+    
+    def start_queue_processor(self):
+        """Process command execution results"""
+        def process():
+            try:
+                while True:
+                    try:
+                        event_type, data = self.command_queue.get_nowait()
+                        
+                        if event_type == 'success':
+                            output = data['output']
+                            error = data['error']
+                            
+                            if output:
+                                self.log_output(output, '#00ff41')
+                            
+                            if error:
+                                self.log_output(f"\n⚠️  Error:\n", '#ffc107')
+                                self.log_output(f"{error}\n", '#ef4444')
+                            
+                            if not output and not error:
+                                self.log_output("(no output)\n", '#8892b0')
+                            
+                            self.log_output(f"\n{'─'*60}\n", '#00d4ff')
+                            
+                            self.status_label.config(text='✓ Connected', 
+                                                   foreground='#28a745')
+                            
+                        elif event_type == 'error':
+                            self.log_output(f"\n❌ Execution Error:\n", '#ef4444')
+                            self.log_output(f"{data}\n", '#ef4444')
+                            self.log_output(f"\n{'─'*60}\n", '#00d4ff')
+                            
+                            self.status_label.config(text='✗ Error', 
+                                                   foreground='#dc3545')
+                        
+                    except queue.Empty:
+                        break
+            finally:
+                self.command_entry.config(state='normal')
+                self.top.after(100, process)
+        
+        process()
+    
+    def log_output(self, text, color='#00ff41'):
+        """Log output to text widget with color"""
+        self.output_text.config(state='normal')
+        
+        tag_name = f'color_{color.replace("#", "")}'
+        self.output_text.tag_configure(tag_name, foreground=color)
+        
+        self.output_text.insert('end', text, tag_name)
+        self.output_text.see('end')
+        
+        self.output_text.config(state='disabled')
+    
+    def paste_from_clipboard(self):
+        """Paste from clipboard to command entry"""
+        try:
+            clipboard_text = self.top.clipboard_get()
+            self.command_var.set(clipboard_text)
+        except:
+            pass
+    
+    def save_output(self):
+        """Save output to file"""
+        filename = filedialog.asksaveasfilename(
+            defaultextension='.txt',
+            filetypes=[('Text files', '*.txt'), ('All files', '*.*')],
+            initialfile=f'{self.host}_output_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt',
+            parent=self.top
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'w') as f:
+                f.write(self.output_text.get('1.0', 'end'))
+            
+            messagebox.showinfo('Save', f'Output saved to:\n{filename}', parent=self.top)
+        except Exception as e:
+            messagebox.showerror('Save Error', str(e), parent=self.top)
+    
+    def copy_output(self):
+        """Copy output to clipboard"""
+        output = self.output_text.get('1.0', 'end')
+        self.top.clipboard_clear()
+        self.top.clipboard_append(output)
+        self.info_label.config(text='Output copied to clipboard')
     
     def export_history(self, host, history_output):
         """Export history to file"""
         filename = filedialog.asksaveasfilename(
             defaultextension='.txt',
             filetypes=[('Text files', '*.txt'), ('All files', '*.*')],
-            initialfile=f'{host}_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
+            initialfile=f'{host}_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt',
+            parent=self.top
         )
         
         if not filename:
@@ -2371,10 +2674,9 @@ class UnixHistoryDialog:
                 f.write("=" * 80 + "\n\n")
                 f.write(history_output)
             
-            messagebox.showinfo('Export', f'History exported to:\n{filename}')
+            messagebox.showinfo('Export', f'History exported to:\n{filename}', parent=self.top)
         except Exception as e:
-            messagebox.showerror('Export Error', str(e))
-
+            messagebox.showerror('Export Error', str(e), parent=self.top)
 class ServerHistoryDialog:
     """Dialog for viewing server history like Unix history command"""
     def __init__(self, master, title, server_history):
@@ -2476,6 +2778,7 @@ class ServerHistoryDialog:
         servers_count = len(server_history)
         scan_count = sum(1 for _, e in all_events if e['type'] == 'scan')
         error_count = sum(1 for _, e in all_events if e['type'] == 'error')
+        
         
         stats_text = f"Total Events: {total_events}  |  Servers: {servers_count}  |  Scans: {scan_count}  |  Errors: {error_count}"
         ttk.Label(stats_frame, text=stats_text, font=('Segoe UI', 10)).pack(side='left')
