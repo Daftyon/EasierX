@@ -1,0 +1,52 @@
+{
+  "Development Server": {
+    "name": "Development Server",
+    "server": "dev_server",
+    "database": "dev_db",
+    "host": "172.19.2.100",
+    "port": "1526",
+    "username": "informix",
+    "informixserver": "dev_informix",
+    "protocol": "onsoctcp"
+  },
+  "Production Server": {
+    "name": "Production Server",
+    "server": "prod_server",
+    "database": "prod_db",
+    "host": "172.19.2.200",
+    "port": "1526",
+    "username": "informix",
+    "informixserver": "prod_informix",
+    "protocol": "onsoctcp"
+  },
+  "Local Test Server": {
+    "name": "Local Test Server",
+    "server": "local_server",
+    "database": "test_db",
+    "host": "localhost",
+    "port": "1526",
+    "username": "informix",
+    "informixserver": "ol_informix1210",
+    "protocol": "onsoctcp"
+  },
+  "ABB Payment System": {
+    "name": "ABB Payment System",
+    "server": "payment_server",
+    "database": "payment_db",
+    "host": "172.19.2.150",
+    "port": "1526",
+    "username": "payment_user",
+    "informixserver": "payment_informix",
+    "protocol": "onsoctcp"
+  },
+  "BANK_CC_TRT": {
+    "name": "BANK_CC_TRT",
+    "server": "BANK_CC_TRT",
+    "database": "ccp",
+    "host": "172.22.15.234",
+    "port": "9027",
+    "username": "cctrtdev",
+    "informixserver": "BANK_CC_TRT",
+    "protocol": "onsoctcp"
+  }
+}

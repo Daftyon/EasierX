@@ -1,1 +1,3 @@
 pyinstaller --onefile --windowed --name=PortiX PortiX.py
+pyinstaller --onefile --windowed --name=BrofdiStore store.py
+

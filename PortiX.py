@@ -1,2105 +1,1790 @@
 #!/usr/bin/env python3
 """
-Enhanced Java Process & API Monitor - Remote-Only Production Desktop App
+Portix Pro v4.0 — Redesigned Edition
 
-Features:
- - Remote java process scanning via SSH
- - Advanced port detection with multiple heuristics
- - Multi-endpoint health monitoring (Actuator, Eureka, Jenkins, Custom)
- - Real-time status tracking with visual alerts
- - Response time monitoring & trending
- - Historical data tracking & analytics
- - Auto-save/restore configurations
- - Batch operations on multiple targets
- - Custom API endpoint configuration
- - Advanced filtering & search
- - Responsive, modern UI design
- 
+A clean, modern redesign of the Java Process & API Monitor.
+Matches the HTML mockup: icon nav, colored monogram badges, status pills,
+compact log footer, and a dense-but-scannable results table.
+
 Dependencies:
-    pip install requests paramiko pillow
+    pip install requests paramiko
 """
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, font
-from datetime import datetime, timedelta
-import threading
-import queue
-import json
+from __future__ import annotations
+
 import base64
+import json
+import queue
 import re
+import threading
 import time
-import os
-from pathlib import Path
+import tkinter as tk
+import webbrowser
 from collections import defaultdict
-import urllib.parse
+from datetime import datetime
+from pathlib import Path
+from tkinter import filedialog, font, messagebox, ttk
 
 try:
     import requests
     import paramiko
 except ImportError as e:
-    raise SystemExit(f"Missing dependency {e}. Install with: pip install requests paramiko")
+    raise SystemExit(f"Missing dependency: {e}. Run: pip install requests paramiko")
 
-# ============== Configuration ==============
+try:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+except Exception:
+    pass
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
+APP_NAME    = "Portix Pro"
+APP_VERSION = "4.0"
 DEFAULT_POLL_SECONDS = 30
-TIMEOUT_SECONDS = 8
-MAX_HISTORY_ENTRIES = 1000
-CONFIG_FILE = Path.home() / '.java_monitor_config.json'
+TIMEOUT_SECONDS      = 8
+MAX_HISTORY_ENTRIES  = 1000
+CONFIG_FILE = Path.home() / ".portix_pro_config.json"
 
-# Predefined service endpoints
 SERVICES = [
-    {"name": "Spring Actuator Health", "path": "/actuator/health", "expect": "status", "critical": True},
-    {"name": "Spring Actuator Info", "path": "/actuator/info", "expect": "", "critical": False},
-    {"name": "Spring Actuator Metrics", "path": "/actuator/metrics", "expect": "names", "critical": False},
-    {"name": "Eureka Apps", "path": "/eureka/apps", "expect": "applications", "critical": True},
-    {"name": "Eureka Status", "path": "/eureka/status", "expect": "", "critical": False},
-    {"name": "Jenkins API", "path": "/api/json", "expect": "", "critical": False},
-    {"name": "Basic Health", "path": "/health", "expect": "", "critical": True},
-    {"name": "Swagger UI", "path": "/swagger-ui.html", "expect": "", "critical": False},
-    {"name": "API Docs", "path": "/v3/api-docs", "expect": "", "critical": False},
+    {"name": "Actuator Health",  "path": "/actuator/health",  "expect": "status",       "critical": True},
+    {"name": "Actuator Info",    "path": "/actuator/info",    "expect": "",             "critical": False},
+    {"name": "Actuator Metrics", "path": "/actuator/metrics", "expect": "names",        "critical": False},
+    {"name": "Eureka Apps",      "path": "/eureka/apps",      "expect": "applications", "critical": True},
+    {"name": "Jenkins API",      "path": "/api/json",         "expect": "",             "critical": False},
+    {"name": "Basic Health",     "path": "/health",           "expect": "",             "critical": True},
+    {"name": "Swagger UI",       "path": "/swagger-ui.html",  "expect": "",             "critical": False},
+    {"name": "API Docs",         "path": "/v3/api-docs",      "expect": "",             "critical": False},
 ]
 
-# Common Java application ports
-COMMON_PORTS = {
-    8080: "Tomcat/Spring Boot",
-    8081: "Management",
-    9090: "Prometheus",
-    8761: "Eureka",
-    8888: "Config Server",
-    8500: "Consul",
+COMMON_PORTS = {8080: "Spring Boot", 8081: "Management", 9090: "Prometheus",
+                8761: "Eureka", 8888: "Config Server", 8500: "Consul"}
+
+
+# ── Palette ───────────────────────────────────────────────────────────────────
+THEMES = {
+    "light": {
+        "name": "Light",
+        # surfaces
+        "bg":           "#f5f6f8",
+        "surface":      "#ffffff",
+        "surface2":     "#f0f2f5",
+        "sidebar":      "#ffffff",
+        "border":       "#e2e5ea",
+        "divider":      "#edf0f3",
+        # text
+        "text":         "#111318",
+        "text2":        "#6b7280",
+        "text3":        "#9ca3af",
+        # accent
+        "accent":       "#378add",
+        "accent2":      "#185fa5",
+        "accent_bg":    "#e6f1fb",
+        # semantic
+        "success":      "#0f6e56",
+        "success_bg":   "#e1f5ee",
+        "danger":       "#a32d2d",
+        "danger_bg":    "#fcebeb",
+        "warning":      "#854f0b",
+        "warning_bg":   "#faeeda",
+        # treeview
+        "tree_bg":      "#ffffff",
+        "tree_alt":     "#f9fafb",
+        "tree_sel":     "#e6f1fb",
+        "tree_sel_fg":  "#111318",
+        # inputs
+        "input_bg":     "#ffffff",
+        # terminal
+        "term_bg":      "#0d1117",
+        "term_fg":      "#c9d1d9",
+        "term_accent":  "#58a6ff",
+        # monogram badge colors: (bg, fg)
+        "badge_blue":   ("#e6f1fb", "#185fa5"),
+        "badge_green":  ("#eaf3de", "#3b6d11"),
+        "badge_amber":  ("#faeeda", "#854f0b"),
+        "badge_purple": ("#eeedfe", "#534ab7"),
+        "badge_teal":   ("#e1f5ee", "#0f6e56"),
+        "badge_coral":  ("#faece7", "#993c1d"),
+    },
+    "dark": {
+        "name": "Dark",
+        "bg":           "#0f1115",
+        "surface":      "#171a21",
+        "surface2":     "#1d2028",
+        "sidebar":      "#13161c",
+        "border":       "#262a33",
+        "divider":      "#20242c",
+        "text":         "#e6e8eb",
+        "text2":        "#9aa1ad",
+        "text3":        "#6b7280",
+        "accent":       "#5b8dff",
+        "accent2":      "#7ba3ff",
+        "accent_bg":    "#1e2a44",
+        "success":      "#4ade80",
+        "success_bg":   "#14301f",
+        "danger":       "#f87171",
+        "danger_bg":    "#3a1717",
+        "warning":      "#fbbf24",
+        "warning_bg":   "#3a2a10",
+        "tree_bg":      "#171a21",
+        "tree_alt":     "#1b1e26",
+        "tree_sel":     "#2a3a5c",
+        "tree_sel_fg":  "#e6e8eb",
+        "input_bg":     "#1d2028",
+        "term_bg":      "#0a0d12",
+        "term_fg":      "#d1d5db",
+        "term_accent":  "#7ba3ff",
+        "badge_blue":   ("#0c447c", "#85b7eb"),
+        "badge_green":  ("#27500a", "#97c459"),
+        "badge_amber":  ("#633806", "#ef9f27"),
+        "badge_purple": ("#3c3489", "#afa9ec"),
+        "badge_teal":   ("#085041", "#5dcaa5"),
+        "badge_coral":  ("#711b13", "#f0997b"),
+    },
 }
 
-# Color scheme - Modern professional theme
-COLORS = {
-    'bg_dark': '#1e1e1e',
-    'bg_light': '#ffffff',
-    'primary': '#0078d4',
-    'primary_dark': '#005a9e',
-    'success': '#28a745',
-    'success_light': '#d4edda',
-    'success_dark': '#155724',
-    'error': '#dc3545',
-    'error_light': '#f8d7da',
-    'error_dark': '#721c24',
-    'warning': '#ffc107',
-    'warning_light': '#fff3cd',
-    'warning_dark': '#856404',
-    'text_dark': '#ffffff',
-    'text_light': '#212529',
-    'border': '#dee2e6',
-    'hover': '#e7f3ff',
-    'gray_light': '#f8f9fa',
-    'gray_medium': '#6c757d',
-}
+# Cycle through badge colors for new app names
+BADGE_KEYS = ["badge_blue", "badge_green", "badge_amber",
+              "badge_purple", "badge_teal", "badge_coral"]
 
-# ============== Utilities ==============
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
 def build_auth_header(auth_type, username, password, token):
-    """Build authentication headers for HTTP requests"""
     headers = {}
-    if auth_type == 'Basic' and username:
-        userpass = f"{username}:{password or ''}".encode('utf-8')
-        headers['Authorization'] = 'Basic ' + base64.b64encode(userpass).decode('ascii')
-    elif auth_type == 'Bearer' and token:
-        headers['Authorization'] = 'Bearer ' + token
+    if auth_type == "Basic" and username:
+        up = f"{username}:{password or ''}".encode()
+        headers["Authorization"] = "Basic " + base64.b64encode(up).decode()
+    elif auth_type == "Bearer" and token:
+        headers["Authorization"] = "Bearer " + token
     return headers
 
+
 def probe_url(base_url, service, timeout=TIMEOUT_SECONDS, headers=None):
-    """Probe a service endpoint and return detailed status"""
-    url = base_url.rstrip('/') + service['path']
-    start_time = time.time()
-    
+    url = base_url.rstrip("/") + service["path"]
+    t0 = time.time()
     try:
         r = requests.get(url, timeout=timeout, headers=headers or {}, verify=False)
-        response_time = (time.time() - start_time) * 1000  # ms
-        
-        ok = (200 <= r.status_code < 300)
-        summary = ''
-        data = None
-        
+        rt = (time.time() - t0) * 1000
+        ok = 200 <= r.status_code < 300
+        summary = ""
         try:
             j = r.json()
-            data = j
-            if service['expect']:
-                found = service['expect'] in json.dumps(j)
+            if service["expect"]:
+                found = service["expect"] in json.dumps(j)
                 summary = f"{r.status_code}, has '{service['expect']}'={found}"
             else:
                 keys = list(j.keys())[:5]
                 summary = f"{r.status_code}, keys: {','.join(keys)}"
         except Exception:
             summary = f"{r.status_code} (non-json)"
-            
-        return {
-            'ok': ok, 
-            'status_code': r.status_code, 
-            'summary': summary, 
-            'url': url,
-            'response_time': response_time,
-            'data': data,
-            'timestamp': datetime.now().isoformat()
-        }
+        return {"ok": ok, "status_code": r.status_code, "summary": summary,
+                "url": url, "response_time": rt,
+                "timestamp": datetime.now().isoformat()}
     except requests.exceptions.Timeout:
-        return {
-            'ok': False, 
-            'status_code': None, 
-            'summary': f'Timeout after {timeout}s', 
-            'url': url,
-            'response_time': timeout * 1000,
-            'timestamp': datetime.now().isoformat()
-        }
-    except requests.exceptions.ConnectionError as e:
-        return {
-            'ok': False, 
-            'status_code': None, 
-            'summary': f'Connection Error', 
-            'url': url,
-            'response_time': None,
-            'timestamp': datetime.now().isoformat()
-        }
+        return {"ok": False, "status_code": None,
+                "summary": f"Timeout after {timeout}s", "url": url,
+                "response_time": timeout * 1000,
+                "timestamp": datetime.now().isoformat()}
+    except requests.exceptions.ConnectionError:
+        return {"ok": False, "status_code": None, "summary": "Connection error",
+                "url": url, "response_time": None,
+                "timestamp": datetime.now().isoformat()}
     except Exception as e:
-        return {
-            'ok': False, 
-            'status_code': None, 
-            'summary': str(e)[:80], 
-            'url': url,
-            'response_time': None,
-            'timestamp': datetime.now().isoformat()
-        }
+        return {"ok": False, "status_code": None, "summary": str(e)[:80],
+                "url": url, "response_time": None,
+                "timestamp": datetime.now().isoformat()}
 
-# Enhanced port detection patterns
+
 JAVA_PORT_PATTERNS = [
-    re.compile(r'--server\.port[=\s]+(\d+)'),
-    re.compile(r'-Dserver\.port[=\s]+(\d+)'),
-    re.compile(r'--port[=\s]+(\d+)'),
-    re.compile(r'-Dport[=\s]+(\d+)'),
-    re.compile(r'--server\.address[=\s]+[\w\.\:]*:(\d+)'),
-    re.compile(r'-Dtomcat\.port[=\s]+(\d+)'),
-    re.compile(r'--management\.port[=\s]+(\d+)'),
-    re.compile(r'-Dhttp\.port[=\s]+(\d+)'),
-    re.compile(r'--http\.port[=\s]+(\d+)'),
-    re.compile(r'--listen[=\s]+[\w\.\:]*:(\d+)'),
-    re.compile(r'-Dlisten\.port[=\s]+(\d+)'),
-    re.compile(r'--address[=\s]+[\w\.\:]*:(\d+)'),
-    re.compile(r'-javaagent.*:(\d{4,5})\b'),  # Java agents often have ports
-    re.compile(r'application\.port[=\s]+(\d+)'),
-    re.compile(r'server\.port[=\s]+(\d+)'),
+    re.compile(r"--server\.port[=\s]+(\d+)"),
+    re.compile(r"-Dserver\.port[=\s]+(\d+)"),
+    re.compile(r"--port[=\s]+(\d+)"),
+    re.compile(r"server\.port[=\s]+(\d+)"),
 ]
 
+
 def parse_java_cmdline(cmdline: str):
-    """Extract port, name, and metadata from Java command line"""
-    port = None
-    name = None
-    jar_name = None
-    main_class = None
-    
-    # Try explicit port patterns first
+    port = name = jar_name = main_class = None
     for p in JAVA_PORT_PATTERNS:
         m = p.search(cmdline)
-        if m:
-            potential_port = m.group(1)
-            if 1024 <= int(potential_port) <= 65535:
-                port = potential_port
-                break
-    
-    # If no explicit port, look for numeric values in valid port range
+        if m and 1024 <= int(m.group(1)) <= 65535:
+            port = m.group(1)
+            break
     if not port:
-        # Look for patterns like :8080 or =8080 or " 8080"
-        for m in re.finditer(r'[\s:=](\d{4,5})\b', cmdline):
-            potential_port = int(m.group(1))
-            if 1024 <= potential_port <= 65535:
-                # Common Java ports are more likely
-                if potential_port in COMMON_PORTS or potential_port in [8080, 8081, 8082, 8083, 8088, 8090, 9090, 8761, 8888]:
-                    port = str(potential_port)
-                    break
-                # Any port in 8000-9999 range is likely
-                elif 8000 <= potential_port <= 9999:
-                    port = str(potential_port)
-                    break
-    
-    # Extract JAR name
-    mjar = re.search(r'([\w\-\.]+)\.jar', cmdline)
+        for m in re.finditer(r"[\s:=](\d{4,5})\b", cmdline):
+            v = int(m.group(1))
+            if v in COMMON_PORTS or 8000 <= v <= 9999:
+                port = str(v)
+                break
+    mjar = re.search(r"([\w\-\.]+)\.jar", cmdline)
     if mjar:
         jar_name = mjar.group(0)
         name = mjar.group(1)
-    
-    # Extract main class
-    mc = re.search(r'\b([A-Za-z0-9_\.]*(?:Application|Main|Server|Bootstrap|Service))\b', cmdline)
+    mc = re.search(r"\b([A-Za-z0-9_\.]*(?:Application|Main|Server|Bootstrap|Service))\b", cmdline)
     if mc:
         main_class = mc.group(1)
         if not name:
-            name = main_class.split('.')[-1]
-    
-    # Try to extract application name from jar path
+            name = main_class.split(".")[-1]
     if not name:
-        jar_path = re.search(r'/([\w\-]+)\.jar', cmdline)
-        if jar_path:
-            name = jar_path.group(1)
-    
-    # Fallback name
-    if not name:
-        if jar_name:
-            name = jar_name.replace('.jar', '')
-        elif main_class:
-            name = main_class
-        else:
-            # Try to extract from classpath
-            cp_match = re.search(r'-cp\s+.*/([\w\-]+)\.jar', cmdline)
-            if cp_match:
-                name = cp_match.group(1)
-            else:
-                name = 'java-process'
-    
-    return {
-        'port': port, 
-        'name': name,
-        'jar': jar_name,
-        'main_class': main_class,
-        'cmdline': cmdline
-    }
+        name = "java-process"
+    return {"port": port, "name": name, "jar": jar_name,
+            "main_class": main_class, "cmdline": cmdline}
 
-# ============== SSH Operations ==============
+
 def ssh_run(host, username, password=None, pkey_path=None, port=22, timeout=10,
-            cmd='ps -eo pid,args | grep java | grep -v grep'):
-    """Execute command on remote host via SSH"""
+            cmd="ps -eo pid,args | grep java | grep -v grep"):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    
     try:
-        connect_kwargs = {
-            'hostname': host,
-            'port': port,
-            'username': username,
-            'timeout': timeout
-        }
-        
+        kw = {"hostname": host, "port": port,
+              "username": username, "timeout": timeout}
         if pkey_path and pkey_path.strip():
-            try:
-                key = paramiko.RSAKey.from_private_key_file(pkey_path)
-                connect_kwargs['pkey'] = key
-            except:
+            for KeyClass in (paramiko.RSAKey, paramiko.Ed25519Key):
                 try:
-                    key = paramiko.Ed25519Key.from_private_key_file(pkey_path)
-                    connect_kwargs['pkey'] = key
-                except:
-                    if password:
-                        connect_kwargs['password'] = password
-        elif password:
-            connect_kwargs['password'] = password
-        
-        client.connect(**connect_kwargs)
-        stdin, stdout, stderr = client.exec_command(cmd)
-        out = stdout.read().decode('utf-8', errors='ignore')
-        err = stderr.read().decode('utf-8', errors='ignore')
+                    kw["pkey"] = KeyClass.from_private_key_file(pkey_path)
+                    break
+                except Exception:
+                    pass
+        if "pkey" not in kw and password:
+            kw["password"] = password
+        elif password and "pkey" not in kw:
+            kw["password"] = password
+        client.connect(**kw)
+        _, stdout, stderr = client.exec_command(cmd)
+        out = stdout.read().decode("utf-8", errors="ignore")
+        err = stderr.read().decode("utf-8", errors="ignore")
         client.close()
         return out, err
     except Exception as e:
         try:
             client.close()
-        except:
+        except Exception:
             pass
-        return '', str(e)
+        return "", str(e)
+
+
+def parse_remote_ps(ps_output: str):
+    items = []
+    for line in ps_output.splitlines():
+        line = line.strip()
+        m = re.match(r"^(\d+)\s+(.*)$", line)
+        if m:
+            parsed = parse_java_cmdline(m.group(2))
+            items.append({"pid": m.group(1), "cmd": m.group(2),
+                          "port": parsed["port"],
+                          "name": parsed["name"] or f"java-{m.group(1)}",
+                          "jar": parsed.get("jar"),
+                          "main_class": parsed.get("main_class")})
+    return items
+
+
+def get_listening_ports(host, username, password=None, pkey_path=None, port=22):
+    cmd = "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null"
+    out, _ = ssh_run(host, username, password, pkey_path, port, cmd=cmd)
+    pid_port_map = {}
+    for line in (out or "").splitlines():
+        pm = re.search(r"pid[=\s]+(\d+)|(\d+)/\w+", line)
+        pt = re.search(r":(\d{4,5})\s", line)
+        if pm and pt:
+            pid = pm.group(1) or pm.group(2)
+            p = pt.group(1)
+            if 1024 <= int(p) <= 65535:
+                pid_port_map[pid] = p
+    return pid_port_map
+
 
 def get_server_history(host, username, password=None, pkey_path=None, port=22, lines=100):
-    """Get Unix command history from remote server"""
-    # Try multiple methods to get history
-    commands = [
-        f"cat ~/.bash_history | tail -n {lines}",  # ← MOVE THIS TO FIRST
-        f"history {lines}",  # Standard history command
-        f"cat ~/.zsh_history | tail -n {lines}",  # Zsh history file
-    ]
-    
-    for cmd in commands:
+    for cmd in [f"cat ~/.bash_history | tail -n {lines}",
+                f"cat ~/.zsh_history | tail -n {lines}"]:
         out, err = ssh_run(host, username, password, pkey_path, port, cmd=cmd)
         if out and not err:
             return out, None
-    
-    return None, "Could not retrieve history from server"
+    return None, "Could not retrieve history"
 
-def get_listening_ports(host, username, password=None, pkey_path=None, port=22):
-    """Get listening ports mapped to PIDs"""
-    # Try to get listening ports with PIDs
-    cmd = "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || lsof -i -n -P 2>/dev/null | grep LISTEN"
-    out, err = ssh_run(host, username, password, pkey_path, port, cmd=cmd)
-    
-    pid_port_map = {}
-    if out:
-        # Parse ss/netstat output
-        for line in out.splitlines():
-            # Look for PID and port patterns
-            # ss format: ... users:(("java",pid=12345,fd=89)) ... :8080
-            # netstat format: ... :8080 ... 12345/java
-            
-            pid_match = re.search(r'pid[=\s]+(\d+)|(\d+)/\w+', line)
-            port_match = re.search(r':(\d{4,5})\s', line)
-            
-            if pid_match and port_match:
-                pid = pid_match.group(1) or pid_match.group(2)
-                listening_port = port_match.group(1)
-                if 1024 <= int(listening_port) <= 65535:
-                    pid_port_map[pid] = listening_port
-    
-    return pid_port_map
 
-def parse_remote_ps_output(ps_output: str):
-    """Parse ps command output to extract Java process information"""
-    lines = [l.strip() for l in ps_output.splitlines() if l.strip()]
-    items = []
-    
-    for line in lines:
-        m = re.match(r'^(\d+)\s+(.*)$', line)
-        if m:
-            pid = m.group(1)
-            cmd = m.group(2)
-            parsed = parse_java_cmdline(cmd)
-            items.append({
-                'pid': pid,
-                'cmd': cmd,
-                'port': parsed['port'],
-                'name': parsed['name'] or f'java-{pid}',
-                'jar': parsed.get('jar'),
-                'main_class': parsed.get('main_class'),
-            })
-    return items
+# ── Colored canvas pill helper ─────────────────────────────────────────────────
+def make_pill_canvas(parent, text, bg, fg, width=80, height=22):
+    c = tk.Canvas(parent, width=width, height=height,
+                  bg=parent.cget("background"), highlightthickness=0, bd=0)
+    r = height // 2
+    # rounded rect
+    c.create_arc(0, 0, r*2, height, start=90, extent=180, fill=bg, outline=bg)
+    c.create_arc(width-r*2, 0, width, height, start=270, extent=180, fill=bg, outline=bg)
+    c.create_rectangle(r, 0, width-r, height, fill=bg, outline=bg)
+    # dot
+    dot_x = r + 3
+    dot_y = height // 2
+    c.create_oval(dot_x-3, dot_y-3, dot_x+3, dot_y+3, fill=fg, outline=fg)
+    # text
+    c.create_text(dot_x + 9, dot_y, text=text, fill=fg,
+                  font=("Segoe UI", 9, "bold"), anchor="w")
+    return c
 
-# ============== Main Application ==============
-class MonitorApp(ttk.Frame):
-    def __init__(self, master):
+
+def make_monogram_canvas(parent, initials, bg, fg, size=28):
+    c = tk.Canvas(parent, width=size, height=size,
+                  bg=parent.cget("background"), highlightthickness=0, bd=0)
+    r = 6
+    c.create_arc(0, 0, r*2, r*2, start=90, extent=90, fill=bg, outline=bg)
+    c.create_arc(size-r*2, 0, size, r*2, start=0, extent=90, fill=bg, outline=bg)
+    c.create_arc(0, size-r*2, r*2, size, start=180, extent=90, fill=bg, outline=bg)
+    c.create_arc(size-r*2, size-r*2, size, size, start=270, extent=90, fill=bg, outline=bg)
+    c.create_rectangle(r, 0, size-r, size, fill=bg, outline=bg)
+    c.create_rectangle(0, r, size, size-r, fill=bg, outline=bg)
+    c.create_text(size//2, size//2, text=initials[:2].upper(),
+                  fill=fg, font=("Segoe UI", 8, "bold"))
+    return c
+
+
+# ── Main Application ──────────────────────────────────────────────────────────
+class PortixApp(ttk.Frame):
+    def __init__(self, master: tk.Tk):
         super().__init__(master)
         self.master = master
-        self.pack(fill='both', expand=True)
-        
-        master.title('PortiX - Java Process & Service Monitor')
-        master.geometry('1600x900')
-        master.minsize(1200, 700)
-        
-        # Set app icon if available
-        try:
-            # You can add an icon file here
-            # master.iconbitmap('portix.ico')
-            pass
-        except:
-            pass
-        
-        # State
-        self.servers = []
-        self.custom_services = []
-        self.result_queue = queue.Queue()
+        self.pack(fill="both", expand=True)
+        master.title(f"{APP_NAME}  ·  Java Process & Service Monitor")
+        master.geometry("1480x860")
+        master.minsize(1100, 660)
+
+        self.theme_name = "light"
+        self.t = THEMES["light"]
+        self.servers: list[dict] = []
+        self.custom_services: list[dict] = []
+        self.result_queue: queue.Queue = queue.Queue()
+        self.history: defaultdict[str, list] = defaultdict(list)
+        self.alert_state: dict = {}
+        self.server_history: defaultdict[str, list] = defaultdict(list)
+        self.stats = {"scans": 0, "probes": 0, "failed": 0}
+        self._badge_idx: dict[str, int] = {}  # name -> badge color index
         self._polling = False
         self._poll_interval = DEFAULT_POLL_SECONDS
-        
-        # History tracking
-        self.history = defaultdict(list)
-        self.alert_state = {}
-        
-        # Server history - track all events per server
-        self.server_history = defaultdict(list)  # {server_host: [events]}
-        self.max_server_history = 100  # Keep last 100 events per server
-        
-        # Statistics
-        self.stats = {
-            'total_scans': 0,
-            'total_probes': 0,
-            'failed_probes': 0,
-            'servers_down': 0
-        }
-        
-        # Current filter
-        self.filter_text = ''
-        
-        self._setup_styles()
-        self._create_menu()
-        self._create_widgets()
-        self._start_queue_poller()
-        self._load_config()
-        
-        # Bind resize event
-        master.bind('<Configure>', self._on_resize)
+        self._poll_inflight = 0
+        self._poll_next_in = 0
+        self._sort_state: dict[str, bool] = {}
 
-    def _setup_styles(self):
-        """Configure modern UI styles"""
+        self._setup_fonts()
+        self._build_styles()
+        self._build_menu()
+        self._build_ui()
+        self._apply_theme_to_widgets()
+        self._start_queue_loop()
+        self._load_config_auto()
+
+    # ── fonts & styles ─────────────────────────────────────────────────────────
+    def _setup_fonts(self):
+        families = font.families()
+        self.font_ui   = "Segoe UI" if "Segoe UI" in families else "Helvetica"
+        self.font_mono = "Consolas" if "Consolas" in families else "Courier"
+        try:
+            font.nametofont("TkDefaultFont").configure(family=self.font_ui, size=10)
+            font.nametofont("TkTextFont").configure(family=self.font_ui, size=10)
+        except Exception:
+            pass
+
+    def _build_styles(self):
+        t = self.t
         style = ttk.Style()
         try:
-            style.theme_use('clam')
-        except:
+            style.theme_use("clam")
+        except Exception:
             pass
-        
-        # Configure main styles with professional colors
-        style.configure('Header.TLabel', 
-                       font=('Segoe UI', 16, 'bold'), 
-                       foreground=COLORS['primary'])
-        style.configure('Subheader.TLabel', 
-                       font=('Segoe UI', 11, 'bold'),
-                       foreground=COLORS['text_light'])
-        style.configure('Status.TLabel', 
-                       font=('Segoe UI', 10))
-        style.configure('Success.TLabel', 
-                       foreground=COLORS['success'], 
-                       font=('Segoe UI', 10, 'bold'))
-        style.configure('Error.TLabel', 
-                       foreground=COLORS['error'], 
-                       font=('Segoe UI', 10, 'bold'))
-        style.configure('Warning.TLabel', 
-                       foreground=COLORS['warning'], 
-                       font=('Segoe UI', 10, 'bold'))
-        
-        # Button styles
-        style.configure('Primary.TButton', 
-                       font=('Segoe UI', 10, 'bold'),
-                       foreground='white',
-                       background=COLORS['primary'])
-        style.map('Primary.TButton',
-                 background=[('active', COLORS['primary_dark'])])
-        
-        style.configure('Success.TButton', 
-                       background=COLORS['success'])
-        style.configure('Danger.TButton', 
-                       background=COLORS['error'])
-        
-        # Frame styles
-        style.configure('Card.TFrame', 
-                       relief='raised', 
-                       borderwidth=1,
-                       background=COLORS['bg_light'])
-        style.configure('TLabelframe', 
-                       font=('Segoe UI', 10, 'bold'),
-                       foreground=COLORS['primary'])
-        style.configure('TLabelframe.Label',
-                       font=('Segoe UI', 10, 'bold'),
-                       foreground=COLORS['primary'])
-        
-        # Configure default fonts
-        default_font = font.nametofont("TkDefaultFont")
-        default_font.configure(family="Segoe UI", size=10)
 
-    def _create_menu(self):
-        """Create application menu bar"""
-        menubar = tk.Menu(self.master)
-        self.master.config(menu=menubar)
-        
-        # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Export Results...", command=self.export_results, 
-                             accelerator="Ctrl+E")
-        file_menu.add_command(label="Export History...", command=self.export_history)
-        file_menu.add_separator()
-        file_menu.add_command(label="Save Config", command=self.save_config, 
-                             accelerator="Ctrl+S")
-        file_menu.add_command(label="Load Config...", command=self.load_config)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.master.quit, 
-                             accelerator="Ctrl+Q")
-        
-        # Targets menu
-        targets_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Targets", menu=targets_menu)
-        targets_menu.add_command(label="Add Remote Target...", command=self.open_add_remote, 
-                                accelerator="Ctrl+N")
-        targets_menu.add_command(label="Edit Selected", command=self.edit_selected_target)
-        targets_menu.add_command(label="Remove Selected", command=self.remove_selected_target, 
-                                accelerator="Delete")
-        targets_menu.add_separator()
-        targets_menu.add_command(label="Scan Selected", command=self.scan_selected_remote, 
-                                accelerator="F5")
-        targets_menu.add_command(label="Scan All Targets", command=self.scan_all_targets, 
-                                accelerator="Ctrl+F5")
-        
-        # Actions menu
-        actions_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Actions", menu=actions_menu)
-        actions_menu.add_command(label="Start/Stop Polling", command=self.toggle_polling, 
-                                accelerator="Ctrl+Space")
-        actions_menu.add_separator()
-        actions_menu.add_command(label="Add Custom Service...", command=self.add_custom_service)
-        actions_menu.add_command(label="Clear Results", command=self.clear_results)
-        
-        # View menu
-        view_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="View", menu=view_menu)
-        view_menu.add_command(label="Show Statistics", command=self.show_statistics, 
-                             accelerator="Ctrl+I")
-        view_menu.add_command(label="Show History", command=self.show_history, 
-                             accelerator="Ctrl+H")
-        view_menu.add_command(label="Server History", command=self.show_server_history,
-                             accelerator="Ctrl+R")
-        view_menu.add_command(label="Refresh Display", command=self.refresh_display, 
-                             accelerator="F5")
-        view_menu.add_separator()
-        view_menu.add_checkbutton(label="Auto-scroll Log", command=self.toggle_autoscroll)
-        
-        # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="Keyboard Shortcuts", command=self.show_shortcuts, 
-                             accelerator="F1")
-        help_menu.add_command(label="About", command=self.show_about)
+        self.master.configure(bg=t["bg"])
+        style.configure(".", background=t["bg"], foreground=t["text"],
+                        fieldbackground=t["input_bg"], bordercolor=t["border"],
+                        lightcolor=t["border"], darkcolor=t["border"])
 
-    def _create_widgets(self):
-        """Create responsive main UI widgets"""
-        # Configure grid weights for responsiveness
+        style.configure("TFrame", background=t["bg"])
+        style.configure("Sidebar.TFrame", background=t["sidebar"])
+        style.configure("Surface.TFrame", background=t["surface"])
+        style.configure("Surface2.TFrame", background=t["surface2"])
+        style.configure("TLabel", background=t["bg"], foreground=t["text"])
+        style.configure("Sidebar.TLabel", background=t["sidebar"], foreground=t["text"])
+        style.configure("Muted.TLabel", background=t["bg"], foreground=t["text2"])
+        style.configure("Subtle.TLabel", background=t["bg"], foreground=t["text3"])
+        style.configure("Surface.TLabel", background=t["surface"], foreground=t["text"])
+        style.configure("SurfaceMuted.TLabel", background=t["surface"], foreground=t["text2"])
+
+        # Brand
+        style.configure("Brand.TLabel", background=t["sidebar"],
+                        foreground=t["accent"],
+                        font=(self.font_ui, 15, "bold"))
+        style.configure("BrandSub.TLabel", background=t["sidebar"],
+                        foreground=t["text3"],
+                        font=(self.font_ui, 9))
+        style.configure("SidebarLabel.TLabel", background=t["sidebar"],
+                        foreground=t["text3"],
+                        font=(self.font_ui, 9, "bold"))
+        style.configure("NavActive.TLabel", background=t["surface2"],
+                        foreground=t["text"],
+                        font=(self.font_ui, 11, "bold"))
+        style.configure("Nav.TLabel", background=t["sidebar"],
+                        foreground=t["text2"],
+                        font=(self.font_ui, 11))
+        style.configure("SectionTitle.TLabel", background=t["bg"],
+                        foreground=t["text"],
+                        font=(self.font_ui, 14, "bold"))
+        style.configure("Meta.TLabel", background=t["bg"],
+                        foreground=t["text3"],
+                        font=(self.font_ui, 11))
+
+        # Buttons
+        style.configure("TButton", background=t["surface2"],
+                        foreground=t["text"], bordercolor=t["border"],
+                        lightcolor=t["border"], darkcolor=t["border"],
+                        focusthickness=0, padding=(10, 6), relief="flat",
+                        font=(self.font_ui, 10))
+        style.map("TButton",
+                  background=[("active", t["border"]),
+                               ("pressed", t["border"])],
+                  foreground=[("disabled", t["text3"])])
+
+        style.configure("Primary.TButton", background=t["accent"],
+                        foreground="#ffffff", bordercolor=t["accent"],
+                        padding=(12, 7),
+                        font=(self.font_ui + " Semibold" if "Segoe UI Semibold" in font.families()
+                               else self.font_ui, 10, "bold"))
+        style.map("Primary.TButton",
+                  background=[("active", t["accent2"]), ("pressed", t["accent2"])],
+                  foreground=[("disabled", "#ffffff")])
+
+        style.configure("Danger.TButton", background=t["danger_bg"],
+                        foreground=t["danger"], bordercolor=t["danger"],
+                        padding=(10, 6))
+        style.map("Danger.TButton",
+                  background=[("active", t["danger"]), ("pressed", t["danger"])],
+                  foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
+
+        style.configure("Sidebar.TButton", background=t["sidebar"],
+                        foreground=t["text2"], bordercolor=t["border"],
+                        focusthickness=0, padding=(8, 6), relief="flat",
+                        font=(self.font_ui, 10))
+        style.map("Sidebar.TButton",
+                  background=[("active", t["surface2"]), ("pressed", t["surface2"])],
+                  foreground=[("active", t["text"]), ("pressed", t["text"])])
+
+        # Entries / combos
+        style.configure("TEntry", fieldbackground=t["input_bg"],
+                        foreground=t["text"], bordercolor=t["border"],
+                        lightcolor=t["border"], darkcolor=t["border"], padding=6)
+        style.map("TEntry", bordercolor=[("focus", t["accent"])])
+        style.configure("TCombobox", fieldbackground=t["input_bg"],
+                        background=t["input_bg"], foreground=t["text"],
+                        bordercolor=t["border"], arrowcolor=t["text2"])
+        style.map("TCombobox", fieldbackground=[("readonly", t["input_bg"])])
+
+        style.configure("TCheckbutton", background=t["bg"],
+                        foreground=t["text"], focuscolor=t["bg"])
+
+        # Treeview
+        style.configure("Treeview", background=t["tree_bg"],
+                        fieldbackground=t["tree_bg"], foreground=t["text"],
+                        bordercolor=t["border"], rowheight=36,
+                        font=(self.font_ui, 10))
+        style.map("Treeview",
+                  background=[("selected", t["tree_sel"])],
+                  foreground=[("selected", t["tree_sel_fg"])])
+        style.configure("Treeview.Heading", background=t["surface2"],
+                        foreground=t["text2"],
+                        font=(self.font_ui, 9, "bold"),
+                        relief="flat", padding=(8, 6))
+        style.map("Treeview.Heading",
+                  background=[("active", t["border"])])
+
+        style.configure("TSeparator", background=t["divider"])
+        style.configure("TPanedwindow", background=t["bg"])
+        style.configure("TScrollbar", background=t["surface2"],
+                        troughcolor=t["bg"], bordercolor=t["bg"],
+                        arrowcolor=t["text2"])
+        style.configure("TLabelframe", background=t["surface"],
+                        bordercolor=t["border"],
+                        lightcolor=t["border"], darkcolor=t["border"],
+                        relief="solid", borderwidth=1)
+        style.configure("TLabelframe.Label", background=t["surface"],
+                        foreground=t["text"],
+                        font=(self.font_ui, 10, "bold"))
+
+    def _apply_theme_to_widgets(self):
+        t = self.t
+        if hasattr(self, "target_listbox"):
+            self.target_listbox.configure(
+                bg=t["sidebar"], fg=t["text"],
+                selectbackground=t["accent_bg"],
+                selectforeground=t["text"],
+                highlightthickness=0, bd=0, activestyle="none")
+        if hasattr(self, "log_text"):
+            self.log_text.configure(bg=t["surface"], fg=t["text"],
+                                    insertbackground=t["text"],
+                                    selectbackground=t["accent_bg"],
+                                    highlightthickness=0, bd=0)
+            self.log_text.tag_configure("ok",   foreground=t["success"])
+            self.log_text.tag_configure("err",  foreground=t["danger"])
+            self.log_text.tag_configure("info", foreground=t["text2"])
+            self.log_text.tag_configure("ts",   foreground=t["text3"])
+        if hasattr(self, "tree"):
+            self.tree.tag_configure("up",      background=t["success_bg"],
+                                    foreground=t["success"])
+            self.tree.tag_configure("down",    background=t["danger_bg"],
+                                    foreground=t["danger"])
+            self.tree.tag_configure("warning", background=t["warning_bg"],
+                                    foreground=t["warning"])
+            self.tree.tag_configure("idle",    foreground=t["text2"])
+
+    def toggle_theme(self):
+        self.theme_name = "dark" if self.theme_name == "light" else "light"
+        self.t = THEMES[self.theme_name]
+        self._build_styles()
+        self._apply_theme_to_widgets()
+        lbl = "☀  Light" if self.theme_name == "dark" else "🌙  Dark"
+        if hasattr(self, "theme_btn"):
+            self.theme_btn.configure(text=lbl)
+        self.log("info", f"Switched to {self.t['name']} theme")
+
+    # ── menu ───────────────────────────────────────────────────────────────────
+    def _build_menu(self):
+        mb = tk.Menu(self.master)
+        self.master.config(menu=mb)
+        fm = tk.Menu(mb, tearoff=0)
+        mb.add_cascade(label="File", menu=fm)
+        fm.add_command(label="Export Results…", command=self.export_results,  accelerator="Ctrl+E")
+        fm.add_command(label="Export History…", command=self.export_history)
+        fm.add_separator()
+        fm.add_command(label="Save Config",     command=self.save_config,     accelerator="Ctrl+S")
+        fm.add_command(label="Load Config…",    command=self.load_config)
+        fm.add_separator()
+        fm.add_command(label="Exit",            command=self.master.quit,     accelerator="Ctrl+Q")
+
+        tm = tk.Menu(mb, tearoff=0)
+        mb.add_cascade(label="Targets", menu=tm)
+        tm.add_command(label="Add Remote Target…",  command=self.open_add_remote,        accelerator="Ctrl+N")
+        tm.add_command(label="Edit Selected",        command=self.edit_selected_target)
+        tm.add_command(label="Remove Selected",      command=self.remove_selected_target, accelerator="Delete")
+        tm.add_separator()
+        tm.add_command(label="Scan Selected",        command=self.scan_selected,          accelerator="F5")
+        tm.add_command(label="Scan All Targets",     command=self.scan_all,               accelerator="Ctrl+F5")
+
+        am = tk.Menu(mb, tearoff=0)
+        mb.add_cascade(label="Actions", menu=am)
+        am.add_command(label="Start/Stop Polling",  command=self.toggle_polling, accelerator="Ctrl+Space")
+        am.add_command(label="Probe Now",           command=self.probe_all)
+        am.add_separator()
+        am.add_command(label="Add Custom Service…", command=self.add_custom_service)
+        am.add_command(label="Clear Results",       command=self.clear_results)
+
+        vm = tk.Menu(mb, tearoff=0)
+        mb.add_cascade(label="View", menu=vm)
+        vm.add_command(label="Toggle Theme",        command=self.toggle_theme,           accelerator="Ctrl+T")
+        vm.add_separator()
+        vm.add_command(label="Statistics",          command=self.show_statistics,        accelerator="Ctrl+I")
+        vm.add_command(label="Service History",     command=self.show_history,           accelerator="Ctrl+H")
+        vm.add_command(label="Server Event Log",    command=self.show_server_event_log,  accelerator="Ctrl+R")
+
+        hm = tk.Menu(mb, tearoff=0)
+        mb.add_cascade(label="Help", menu=hm)
+        hm.add_command(label="Keyboard Shortcuts",  command=self.show_shortcuts, accelerator="F1")
+        hm.add_command(label="About",               command=self.show_about)
+
+    # ── UI scaffold ────────────────────────────────────────────────────────────
+    def _build_ui(self):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        
-        # Main container with paned window
-        self.main_paned = ttk.PanedWindow(self, orient='horizontal')
-        self.main_paned.grid(row=0, column=0, sticky='nsew', padx=0, pady=0)
-        
-        # Left panel - Targets (20% width)
-        left = self._create_left_panel(self.main_paned)
-        self.main_paned.add(left, weight=1)
-        
-        # Right container - vertical paned for results and details
-        right_paned = ttk.PanedWindow(self.main_paned, orient='vertical')
-        self.main_paned.add(right_paned, weight=4)
-        
-        # Top right - Results (70% height)
-        results = self._create_results_panel(right_paned)
-        right_paned.add(results, weight=7)
-        
-        # Bottom right - Log and Status (30% height)
-        bottom = self._create_bottom_panel(right_paned)
-        right_paned.add(bottom, weight=3)
+        paned = ttk.PanedWindow(self, orient="horizontal")
+        paned.grid(row=0, column=0, sticky="nsew")
+        paned.add(self._build_sidebar(paned), weight=0)
+        paned.add(self._build_main(paned),    weight=1)
 
-    def _create_left_panel(self, parent):
-        """Create responsive left panel with target management"""
-        left = ttk.Frame(parent, padding=10)
-        left.grid_rowconfigure(8, weight=1)
-        left.grid_columnconfigure(0, weight=1)
-        
-        # Header with PortiX branding
-        header_frame = ttk.Frame(left)
-        header_frame.grid(row=0, column=0, sticky='we', pady=(0, 15))
-        header_frame.grid_columnconfigure(0, weight=1)
-        
-        # App logo/title
-        title_label = ttk.Label(header_frame, text='🌐 PortiX', 
-                               font=('Segoe UI', 18, 'bold'),
-                               foreground=COLORS['primary'])
-        title_label.grid(row=0, column=0, sticky='w')
-        
-        subtitle_label = ttk.Label(header_frame, text='Remote Targets', 
-                                   font=('Segoe UI', 10),
-                                   foreground=COLORS['gray_medium'])
-        subtitle_label.grid(row=1, column=0, sticky='w', pady=(2, 0))
-        
-        # Action buttons
-        btn_frame = ttk.Frame(left)
-        btn_frame.grid(row=1, column=0, sticky='we', pady=(0, 10))
-        btn_frame.grid_columnconfigure(0, weight=1)
-        
-        ttk.Button(btn_frame, text='➕ Add Remote', 
-                  command=self.open_add_remote, 
-                  style='Primary.TButton').grid(row=0, column=0, sticky='we', pady=2)
-        
-        ttk.Button(btn_frame, text='🔍 Scan Selected', 
-                  command=self.scan_selected_remote).grid(row=1, column=0, sticky='we', pady=2)
-        
-        ttk.Button(btn_frame, text='🔄 Scan All', 
-                  command=self.scan_all_targets).grid(row=2, column=0, sticky='we', pady=2)
-        
-        ttk.Button(btn_frame, text='📜 Server History', 
-                  command=self.show_server_history).grid(row=3, column=0, sticky='we', pady=2)
-        
-        ttk.Button(btn_frame, text='✏️ Edit', 
-                  command=self.edit_selected_target).grid(row=4, column=0, sticky='we', pady=2)
-        
-        ttk.Button(btn_frame, text='🗑️ Remove', 
-                  command=self.remove_selected_target).grid(row=5, column=0, sticky='we', pady=2)
-        
-        ttk.Separator(left, orient='horizontal').grid(
-            row=2, column=0, sticky='we', pady=10
-        )
-        
-        # Target listbox with scrollbar
-        list_label = ttk.Label(left, text='Configured Targets:', style='Subheader.TLabel')
-        list_label.grid(row=3, column=0, sticky='w', pady=(0, 5))
-        
-        list_frame = ttk.Frame(left, style='Card.TFrame', relief='sunken', borderwidth=1)
-        list_frame.grid(row=4, column=0, sticky='nswe', pady=(0, 10))
-        list_frame.grid_rowconfigure(0, weight=1)
-        list_frame.grid_columnconfigure(0, weight=1)
-        
-        self.target_listbox = tk.Listbox(list_frame, selectmode='extended', 
-                                         font=('Segoe UI', 10),
-                                         relief='flat', borderwidth=0,
-                                         highlightthickness=0)
-        self.target_listbox.grid(row=0, column=0, sticky='nswe')
-        
-        target_scroll = ttk.Scrollbar(list_frame, orient='vertical', 
-                                      command=self.target_listbox.yview)
-        target_scroll.grid(row=0, column=1, sticky='ns')
-        self.target_listbox.configure(yscrollcommand=target_scroll.set)
-        
-        # Bind events
-        self.target_listbox.bind('<Double-Button-1>', 
-                                lambda e: self.scan_selected_remote())
-        self.target_listbox.bind('<<ListboxSelect>>', self.on_target_select)
-        
-        # Target info card
-        info_frame = ttk.LabelFrame(left, text='Target Information', padding=10)
-        info_frame.grid(row=5, column=0, sticky='we', pady=(0, 10))
-        info_frame.grid_columnconfigure(0, weight=1)
-        
-        self.target_info_label = ttk.Label(info_frame, text='Select a target to view details', 
-                                          wraplength=250, justify='left')
-        self.target_info_label.grid(row=0, column=0, sticky='we')
-        
-        # Quick stats
-        stats_frame = ttk.LabelFrame(left, text='Quick Stats', padding=10)
-        stats_frame.grid(row=6, column=0, sticky='we')
-        stats_frame.grid_columnconfigure(1, weight=1)
-        
-        ttk.Label(stats_frame, text='Targets:').grid(row=0, column=0, sticky='w', pady=2)
-        self.target_count_label = ttk.Label(stats_frame, text='0', 
-                                           font=('Segoe UI', 10, 'bold'))
-        self.target_count_label.grid(row=0, column=1, sticky='e', pady=2)
-        
-        ttk.Label(stats_frame, text='Services:').grid(row=1, column=0, sticky='w', pady=2)
-        self.service_count_label = ttk.Label(stats_frame, text='0', 
-                                            font=('Segoe UI', 10, 'bold'))
-        self.service_count_label.grid(row=1, column=1, sticky='e', pady=2)
-        
-        # Now refresh targets after all widgets are created
-        self.refresh_targets()
-        
-        return left
-    
-    def _create_results_panel(self, parent):
-        """Create responsive results panel"""
-        results = ttk.Frame(parent, padding=10)
-        results.grid_rowconfigure(3, weight=1)
-        results.grid_columnconfigure(0, weight=1)
-        
-        # Header with status indicators
-        header_frame = ttk.Frame(results)
-        header_frame.grid(row=0, column=0, sticky='we', pady=(0, 15))
-        header_frame.grid_columnconfigure(1, weight=1)
-        
-        # Title with icon
-        title_container = ttk.Frame(header_frame)
-        title_container.grid(row=0, column=0, sticky='w')
-        
-        ttk.Label(title_container, text='📊', 
-                 font=('Segoe UI', 18)).pack(side='left', padx=(0, 5))
-        ttk.Label(title_container, text='Discovered Services', 
-                 font=('Segoe UI', 16, 'bold'),
-                 foreground=COLORS['primary']).pack(side='left')
-        
-        # Status indicators with better styling
-        status_frame = ttk.Frame(header_frame)
-        status_frame.grid(row=0, column=1, sticky='e')
-        
-        self.status_up_label = ttk.Label(status_frame, text='🟢 0', 
-                                        font=('Segoe UI', 11, 'bold'),
-                                        foreground=COLORS['success'])
-        self.status_up_label.pack(side='left', padx=10)
-        
-        self.status_down_label = ttk.Label(status_frame, text='🔴 0',
-                                          font=('Segoe UI', 11, 'bold'),
-                                          foreground=COLORS['error'])
-        self.status_down_label.pack(side='left', padx=10)
-        
-        self.status_unknown_label = ttk.Label(status_frame, text='⚪ 0',
-                                             font=('Segoe UI', 11),
-                                             foreground=COLORS['gray_medium'])
-        self.status_unknown_label.pack(side='left', padx=10)
-        
-        # Control toolbar
-        toolbar = ttk.Frame(results)
-        toolbar.grid(row=1, column=0, sticky='we', pady=(0, 5))
-        toolbar.grid_columnconfigure(3, weight=1)
-        
-        # Polling control
-        self.poll_button = ttk.Button(toolbar, text='▶️ Start Polling', 
-                                      command=self.toggle_polling)
-        self.poll_button.grid(row=0, column=0, padx=2)
-        
-        # Polling interval
-        ttk.Label(toolbar, text='Interval:').grid(row=0, column=1, padx=(15, 2))
+    # ── sidebar ────────────────────────────────────────────────────────────────
+    def _build_sidebar(self, parent):
+        t = self.t
+        side = ttk.Frame(parent, style="Sidebar.TFrame", width=245)
+        side.grid_propagate(False)
+        side.grid_rowconfigure(5, weight=1)
+        side.grid_columnconfigure(0, weight=1)
+
+        # ── brand ──
+        brand = ttk.Frame(side, style="Sidebar.TFrame", padding=(18, 18, 18, 14))
+        brand.grid(row=0, column=0, sticky="we")
+        brand.grid_columnconfigure(1, weight=1)
+
+        dot_c = tk.Canvas(brand, width=26, height=26, bg=t["sidebar"],
+                          highlightthickness=0, bd=0)
+        dot_c.create_rectangle(0, 0, 26, 26, fill=t["accent"], outline=t["accent"])
+        dot_c.create_oval(7, 7, 19, 19, fill="white", outline="white")
+        dot_c.create_oval(10, 10, 16, 16, fill=t["accent"], outline=t["accent"])
+        dot_c.grid(row=0, column=0, padx=(0, 8))
+        self.brand_canvas = dot_c
+
+        ttk.Label(brand, text=APP_NAME, style="Brand.TLabel").grid(
+            row=0, column=1, sticky="w")
+
+        self.theme_btn = ttk.Button(brand, text="🌙  Dark",
+                                    style="Sidebar.TButton",
+                                    command=self.toggle_theme, width=8)
+        self.theme_btn.grid(row=0, column=2, sticky="e")
+
+        ttk.Label(brand, text=f"Java monitor · v{APP_VERSION}",
+                  style="BrandSub.TLabel").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+        # ── border ──
+        sep1 = tk.Frame(side, bg=t["border"], height=1)
+        sep1.grid(row=1, column=0, sticky="we")
+        self._sep_widgets = [sep1]
+
+        # ── primary action ──
+        action_frame = ttk.Frame(side, style="Sidebar.TFrame", padding=(14, 12, 14, 6))
+        action_frame.grid(row=2, column=0, sticky="we")
+        action_frame.grid_columnconfigure(0, weight=1)
+        ttk.Button(action_frame, text="+ Add remote target",
+                   style="Primary.TButton",
+                   command=self.open_add_remote).grid(
+            row=0, column=0, sticky="we", pady=(0, 8))
+
+        # quick action row
+        q = ttk.Frame(action_frame, style="Sidebar.TFrame")
+        q.grid(row=1, column=0, sticky="we", pady=(0, 4))
+        q.grid_columnconfigure(0, weight=1)
+        q.grid_columnconfigure(1, weight=1)
+        ttk.Button(q, text="Scan",     style="Sidebar.TButton",
+                   command=self.scan_selected).grid(row=0, column=0, sticky="we", padx=(0, 3))
+        ttk.Button(q, text="Scan all", style="Sidebar.TButton",
+                   command=self.scan_all).grid(row=0, column=1, sticky="we", padx=(3, 0))
+
+        # extra actions row
+        e = ttk.Frame(action_frame, style="Sidebar.TFrame")
+        e.grid(row=2, column=0, sticky="we")
+        for i, (lbl, cmd) in enumerate([("Edit",   self.edit_selected_target),
+                                         ("Remove", self.remove_selected_target),
+                                         ("Shell",  self.show_server_history)]):
+            e.grid_columnconfigure(i, weight=1)
+            ttk.Button(e, text=lbl, style="Sidebar.TButton", command=cmd).grid(
+                row=0, column=i, sticky="we", padx=(0 if i==0 else 2, 2 if i<2 else 0))
+
+        sep2 = tk.Frame(side, bg=t["border"], height=1)
+        sep2.grid(row=3, column=0, sticky="we", pady=(10, 0))
+        self._sep_widgets.append(sep2)
+
+        # ── targets label ──
+        ttk.Label(side, text="TARGETS",
+                  style="SidebarLabel.TLabel",
+                  padding=(18, 8, 18, 4)).grid(row=4, column=0, sticky="we")
+
+        # ── target list ──
+        list_wrap = tk.Frame(side, bg=t["border"])
+        list_wrap.grid(row=5, column=0, sticky="nswe", padx=14, pady=(0, 12))
+        list_wrap.grid_rowconfigure(0, weight=1)
+        list_wrap.grid_columnconfigure(0, weight=1)
+
+        self.target_listbox = tk.Listbox(
+            list_wrap, selectmode="extended",
+            font=(self.font_ui, 10),
+            relief="flat", bd=0, highlightthickness=0,
+            activestyle="none")
+        self.target_listbox.grid(row=0, column=0, sticky="nswe", padx=1, pady=1)
+        tsb = ttk.Scrollbar(list_wrap, orient="vertical",
+                             command=self.target_listbox.yview)
+        tsb.grid(row=0, column=1, sticky="ns")
+        self.target_listbox.configure(yscrollcommand=tsb.set)
+        self.target_listbox.bind("<Double-Button-1>", lambda e: self.scan_selected())
+        self.target_listbox.bind("<<ListboxSelect>>", self.on_target_select)
+
+        # ── detail card ──
+        info_card = ttk.LabelFrame(side, text="Details", padding=10,
+                                   style="TLabelframe")
+        info_card.grid(row=6, column=0, sticky="we", padx=14, pady=(0, 10))
+        info_card.grid_columnconfigure(0, weight=1)
+        self.target_detail_label = ttk.Label(info_card,
+                                             text="Select a target.",
+                                             style="SurfaceMuted.TLabel",
+                                             wraplength=200, justify="left",
+                                             font=(self.font_ui, 9))
+        self.target_detail_label.grid(row=0, column=0, sticky="we")
+
+        # ── overview card ──
+        ov = ttk.LabelFrame(side, text="Overview", padding=10)
+        ov.grid(row=7, column=0, sticky="we", padx=14, pady=(0, 14))
+        ov.grid_columnconfigure(1, weight=1)
+        for r, (lbl, attr) in enumerate([("Targets", "ov_targets_lbl"),
+                                          ("Services", "ov_services_lbl")]):
+            ttk.Label(ov, text=lbl, style="SurfaceMuted.TLabel").grid(
+                row=r, column=0, sticky="w", pady=2)
+            lbl_w = ttk.Label(ov, text="0", style="Surface.TLabel",
+                              font=(self.font_ui, 11, "bold"))
+            lbl_w.grid(row=r, column=1, sticky="e", pady=2)
+            setattr(self, attr, lbl_w)
+
+        self._refresh_targets()
+        return side
+
+    # ── main panel ─────────────────────────────────────────────────────────────
+    def _build_main(self, parent):
+        main = ttk.PanedWindow(parent, orient="vertical")
+        main.add(self._build_results(main), weight=5)
+        main.add(self._build_log(main),     weight=1)
+        return main
+
+    # ── results ────────────────────────────────────────────────────────────────
+    def _build_results(self, parent):
+        t = self.t
+        wrap = ttk.Frame(parent, style="Surface.TFrame",
+                         padding=(20, 16, 20, 10))
+        wrap.grid_rowconfigure(2, weight=1)
+        wrap.grid_columnconfigure(0, weight=1)
+
+        # header row
+        hdr = ttk.Frame(wrap, style="Surface.TFrame")
+        hdr.grid(row=0, column=0, sticky="we", pady=(0, 12))
+        hdr.grid_columnconfigure(1, weight=1)
+
+        title_box = ttk.Frame(hdr, style="Surface.TFrame")
+        title_box.grid(row=0, column=0, sticky="w")
+        ttk.Label(title_box, text="Services", style="SectionTitle.TLabel",
+                  background=t["surface"]).pack(side="left")
+        ttk.Label(title_box, text="  Discovered Java processes & probed endpoints",
+                  style="Meta.TLabel",
+                  background=t["surface"]).pack(side="left", padx=(4, 0))
+
+        pills_frame = ttk.Frame(hdr, style="Surface.TFrame")
+        pills_frame.grid(row=0, column=1, sticky="e")
+        self.pill_up_var   = tk.StringVar(value="0 up")
+        self.pill_down_var = tk.StringVar(value="0 down")
+        self.pill_idle_var = tk.StringVar(value="0 idle")
+
+        self.status_pills_frame = pills_frame  # kept for repaint
+        self._draw_status_pills()
+
+        # toolbar
+        tb = ttk.Frame(wrap, style="Surface.TFrame")
+        tb.grid(row=1, column=0, sticky="we", pady=(0, 10))
+        tb.grid_columnconfigure(8, weight=1)
+
+        self.poll_btn = ttk.Button(tb, text="▶  Start polling",
+                                   style="Primary.TButton",
+                                   command=self.toggle_polling)
+        self.poll_btn.grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(tb, text="Probe now",
+                   command=self.probe_all).grid(row=0, column=1, padx=(0, 10))
+
+        tk.Frame(tb, bg=t["border"], width=1, height=20).grid(
+            row=0, column=2, padx=6)
+
+        ttk.Label(tb, text="Interval",
+                  style="Muted.TLabel",
+                  background=t["surface"]).grid(row=0, column=3, padx=(0, 4))
         self.poll_interval_var = tk.StringVar(value=str(DEFAULT_POLL_SECONDS))
-        interval_combo = ttk.Combobox(toolbar, textvariable=self.poll_interval_var, 
-                                     width=6, values=['10', '30', '60', '120', '300'],
-                                     state='readonly')
-        interval_combo.grid(row=0, column=2, sticky='w', padx=2)
-        ttk.Label(toolbar, text='sec').grid(row=0, column=3, sticky='w', padx=2)
-        
-        # Search/Filter bar
-        search_frame = ttk.Frame(results)
-        search_frame.grid(row=2, column=0, sticky='we', pady=(0, 5))
-        search_frame.grid_columnconfigure(1, weight=1)
-        
-        ttk.Label(search_frame, text='🔎').grid(row=0, column=0, padx=(0, 5))
-        
-        # Initialize show_all_var BEFORE search_var - DEFAULT TO TRUE (CHECKED)
-        self.show_all_var = tk.BooleanVar(value=True)
-        
+        self.poll_interval_var.trace_add("write", lambda *a: self._on_interval_change())
+        ttk.Combobox(tb, textvariable=self.poll_interval_var, width=5,
+                     state="readonly",
+                     values=["10", "30", "60", "120", "300"]).grid(
+            row=0, column=4, padx=(0, 4))
+        ttk.Label(tb, text="s",
+                  style="Muted.TLabel",
+                  background=t["surface"]).grid(row=0, column=5, padx=(0, 14))
+
+        tk.Frame(tb, bg=t["border"], width=1, height=20).grid(
+            row=0, column=6, padx=6)
+
+        # search
+        search_outer = ttk.Frame(tb, style="Surface.TFrame")
+        search_outer.grid(row=0, column=7, padx=(0, 8))
+        ttk.Label(search_outer, text="Filter",
+                  style="Muted.TLabel",
+                  background=t["surface"]).pack(side="left", padx=(0, 6))
         self.search_var = tk.StringVar()
-        self.search_var.trace('w', lambda *args: self.apply_filter())
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
-        search_entry.grid(row=0, column=1, sticky='we', padx=2)
-        
-        ttk.Button(search_frame, text='✖', width=3, 
-                  command=lambda: self.search_var.set('')).grid(row=0, column=2, padx=2)
-        
-        # Show all checkbox - CHECKED by default
-        ttk.Checkbutton(search_frame, text='Show all', 
-                       variable=self.show_all_var,
-                       command=self.apply_filter).grid(row=0, column=3, padx=5)
-        
-        ttk.Button(search_frame, text='⟳ Refresh', 
-                  command=self.refresh_display).grid(row=0, column=4, padx=2)
-        
-        # Results tree with modern styling
-        tree_frame = ttk.Frame(results, relief='sunken', borderwidth=1)
-        tree_frame.grid(row=3, column=0, sticky='nswe')
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
-        
-        cols = ('target', 'pid', 'name', 'port', 'service', 
-                'status', 'response_time', 'last_check', 'summary')
-        self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings', 
-                                selectmode='extended')
-        
-        # Configure columns with proper widths
-        col_config = {
-            'target': {'text': 'Target', 'width': 150, 'stretch': False},
-            'pid': {'text': 'PID', 'width': 70, 'stretch': False},
-            'name': {'text': 'Application', 'width': 180, 'stretch': True},
-            'port': {'text': 'Port', 'width': 70, 'stretch': False},
-            'service': {'text': 'Service', 'width': 150, 'stretch': True},
-            'status': {'text': 'Status', 'width': 90, 'stretch': False},
-            'response_time': {'text': 'Response', 'width': 90, 'stretch': False},
-            'last_check': {'text': 'Last Check', 'width': 90, 'stretch': False},
-            'summary': {'text': 'Details', 'width': 250, 'stretch': True}
+        self.search_var.trace_add("write", lambda *a: self._apply_filter())
+        ttk.Entry(search_outer, textvariable=self.search_var,
+                  width=22).pack(side="left")
+
+        self.show_all_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(tb, text="Show all",
+                        variable=self.show_all_var,
+                        command=self._apply_filter,
+                        style="TCheckbutton").grid(row=0, column=8, padx=(4, 0))
+
+        self.poll_indicator = ttk.Label(tb, text="⏸  Idle",
+                                        style="Muted.TLabel",
+                                        background=t["surface"])
+        self.poll_indicator.grid(row=0, column=9, padx=(20, 0))
+
+        # results tree
+        tree_container = tk.Frame(wrap, bg=t["border"], bd=0, highlightthickness=0)
+        tree_container.grid(row=2, column=0, sticky="nswe")
+        tree_container.grid_rowconfigure(0, weight=1)
+        tree_container.grid_columnconfigure(0, weight=1)
+
+        cols = ("target", "pid", "name", "port", "service",
+                "status", "response_time", "last_check", "summary")
+        self.tree = ttk.Treeview(tree_container, columns=cols,
+                                 show="headings", selectmode="extended")
+        col_cfg = {
+            "target":        ("Target",      140, False),
+            "pid":           ("PID",          60, False),
+            "name":          ("Application", 190, True),
+            "port":          ("Port",         72, False),
+            "service":       ("Service",     150, True),
+            "status":        ("Status",       90, False),
+            "response_time": ("Response",     90, False),
+            "last_check":    ("Checked",      80, False),
+            "summary":       ("Details",     260, True),
         }
-        
-        for col, config in col_config.items():
-            self.tree.heading(col, text=config['text'], 
-                            command=lambda c=col: self.sort_tree(c))
-            self.tree.column(col, anchor='w', width=config['width'], 
-                           stretch=config['stretch'])
-        
-        self.tree.grid(row=0, column=0, sticky='nswe')
-        
-        # Scrollbars
-        vsb = ttk.Scrollbar(tree_frame, orient='vertical', command=self.tree.yview)
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb = ttk.Scrollbar(tree_frame, orient='horizontal', command=self.tree.xview)
-        hsb.grid(row=1, column=0, sticky='we')
+        for col, (label, width, stretch) in col_cfg.items():
+            self.tree.heading(col, text=label,
+                              command=lambda c=col: self._sort_tree(c))
+            self.tree.column(col, anchor="w", width=width, stretch=stretch)
+
+        self.tree.grid(row=0, column=0, sticky="nswe", padx=1, pady=1)
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
+        hsb.grid(row=1, column=0, sticky="we")
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        # Tags for row colors with professional styling
-        self.tree.tag_configure('up', 
-                               background=COLORS['success_light'], 
-                               foreground=COLORS['success_dark'])
-        self.tree.tag_configure('down', 
-                               background=COLORS['error_light'], 
-                               foreground=COLORS['error_dark'])
-        self.tree.tag_configure('warning', 
-                               background=COLORS['warning_light'], 
-                               foreground=COLORS['warning_dark'])
-        self.tree.tag_configure('selected', 
-                               background=COLORS['primary'], 
-                               foreground='white')
-        
-        # Context menu
-        self.tree_menu = tk.Menu(self.tree, tearoff=0)
-        self.tree_menu.add_command(label="📋 Copy URL", command=self.copy_url)
-        self.tree_menu.add_command(label="🌐 Open in Browser", command=self.open_in_browser)
-        self.tree_menu.add_separator()
-        self.tree_menu.add_command(label="ℹ️ View Details", command=self.view_details)
-        self.tree_menu.add_command(label="📈 View History", command=self.view_item_history)
-        self.tree_menu.add_separator()
-        self.tree_menu.add_command(label="🗑️ Delete", command=self.delete_selected)
-        
-        self.tree.bind('<Button-3>', self.show_tree_menu)
-        
-        return results
-    
-    def _create_bottom_panel(self, parent):
-        """Create responsive bottom panel with log and statistics"""
-        bottom = ttk.Frame(parent, padding=10)
-        bottom.grid_rowconfigure(1, weight=1)
-        bottom.grid_columnconfigure(0, weight=1)
-        
-        # Statistics bar with PortiX branding
-        stats_frame = ttk.Frame(bottom)
-        stats_frame.grid(row=0, column=0, sticky='we', pady=(0, 8))
-        stats_frame.grid_columnconfigure(1, weight=1)
-        
-        # PortiX logo in stats bar
-        ttk.Label(stats_frame, text='📊 PortiX', 
-                 font=('Segoe UI', 11, 'bold'),
-                 foreground=COLORS['primary']).grid(row=0, column=0, padx=(0, 10))
-        
-        self.stats_label = ttk.Label(stats_frame, text='Ready', 
-                                     font=('Segoe UI', 10))
-        self.stats_label.grid(row=0, column=1, sticky='w')
-        
-        # Polling status indicator with better styling
-        self.polling_indicator = ttk.Label(stats_frame, text='⏸️ Idle', 
-                                          font=('Segoe UI', 10),
-                                          foreground=COLORS['gray_medium'])
-        self.polling_indicator.grid(row=0, column=2, sticky='e', padx=15)
-        
-        # Log section
-        log_frame = ttk.LabelFrame(bottom, text='Activity Log', padding=5)
-        log_frame.grid(row=1, column=0, sticky='nswe')
+
+        # context menu
+        self.ctx = tk.Menu(self.tree, tearoff=0)
+        self.ctx.add_command(label="Copy URL",          command=self._copy_url)
+        self.ctx.add_command(label="Open in browser",   command=self._open_browser)
+        self.ctx.add_separator()
+        self.ctx.add_command(label="Probe now",         command=self._probe_selected)
+        self.ctx.add_command(label="View details",      command=self._view_details)
+        self.ctx.add_command(label="View history",      command=self._view_item_history)
+        self.ctx.add_separator()
+        self.ctx.add_command(label="Delete row",        command=self._delete_selected)
+
+        self.tree.bind("<Button-3>",      self._show_ctx)
+        self.tree.bind("<Double-Button-1>", lambda e: self._view_details())
+
+        return wrap
+
+    def _draw_status_pills(self):
+        t = self.t
+        for w in self.status_pills_frame.winfo_children():
+            w.destroy()
+        for text_var, bg, fg in [
+            (self.pill_up_var,   t["success_bg"], t["success"]),
+            (self.pill_down_var, t["danger_bg"],  t["danger"]),
+            (self.pill_idle_var, t["surface2"],   t["text2"]),
+        ]:
+            lbl = tk.Label(self.status_pills_frame,
+                           textvariable=text_var,
+                           bg=bg, fg=fg,
+                           font=(self.font_ui, 10, "bold"),
+                           padx=10, pady=3,
+                           relief="flat")
+            lbl.pack(side="left", padx=4)
+
+    # ── log footer ─────────────────────────────────────────────────────────────
+    def _build_log(self, parent):
+        t = self.t
+        wrap = ttk.Frame(parent, style="Surface.TFrame")
+        wrap.grid_rowconfigure(1, weight=1)
+        wrap.grid_columnconfigure(0, weight=1)
+
+        # header strip
+        bar = tk.Frame(wrap, bg=t["border"], height=1)
+        bar.grid(row=0, column=0, sticky="we")
+
+        hdr = ttk.Frame(wrap, style="Surface.TFrame", padding=(20, 6, 20, 0))
+        hdr.grid(row=1, column=0, sticky="we")
+        hdr.grid_columnconfigure(0, weight=1)
+        ttk.Label(hdr, text="Activity log",
+                  style="SurfaceMuted.TLabel",
+                  font=(self.font_ui, 11, "bold")).grid(row=0, column=0, sticky="w")
+
+        ctrl = ttk.Frame(hdr, style="Surface.TFrame")
+        ctrl.grid(row=0, column=1, sticky="e")
+        for lbl, cmd in [("Clear",   lambda: self.log_text.delete("1.0", "end")),
+                          ("Save…",  self._save_log),
+                          ("Export…",self.export_results)]:
+            ttk.Button(ctrl, text=lbl, command=cmd,
+                       padding=(8, 3)).pack(side="left", padx=3)
+
+        self.stats_label = ttk.Label(hdr, text="Ready",
+                                     style="SurfaceMuted.TLabel",
+                                     font=(self.font_ui, 9))
+        self.stats_label.grid(row=0, column=2, padx=(20, 0))
+
+        # log text
+        log_frame = ttk.Frame(wrap, style="Surface.TFrame",
+                              padding=(20, 4, 20, 12))
+        log_frame.grid(row=2, column=0, sticky="nswe")
         log_frame.grid_rowconfigure(0, weight=1)
         log_frame.grid_columnconfigure(0, weight=1)
-        
-        log_container = ttk.Frame(log_frame)
-        log_container.grid(row=0, column=0, sticky='nswe')
-        log_container.grid_rowconfigure(0, weight=1)
-        log_container.grid_columnconfigure(0, weight=1)
-        
-        self.log_text = tk.Text(log_container, height=6, wrap='word',
-                               font=('Consolas', 9), relief='flat',
-                               borderwidth=0, highlightthickness=0)
-        self.log_text.grid(row=0, column=0, sticky='nswe')
-        
-        log_scroll = ttk.Scrollbar(log_container, orient='vertical', 
-                                   command=self.log_text.yview)
-        log_scroll.grid(row=0, column=1, sticky='ns')
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-        
-        # Log controls
-        log_ctrl = ttk.Frame(log_frame)
-        log_ctrl.grid(row=1, column=0, sticky='we', pady=(5, 0))
-        
-        ttk.Button(log_ctrl, text='Clear Log', 
-                  command=lambda: self.log_text.delete('1.0', 'end')).pack(side='left', padx=2)
-        ttk.Button(log_ctrl, text='Save Log...', 
-                  command=self.save_log).pack(side='left', padx=2)
-        ttk.Button(log_ctrl, text='Export Results...', 
-                  command=self.export_results).pack(side='left', padx=2)
-        
-        return bottom
 
-    def _on_resize(self, event):
-        """Handle window resize for responsive layout"""
-        # Adjust column widths based on window width
-        if event.widget == self.master:
-            width = event.width
-            if hasattr(self, 'tree'):
-                # Proportional column widths
-                if width > 1400:
-                    self.tree.column('summary', width=350)
-                    self.tree.column('name', width=200)
-                elif width > 1200:
-                    self.tree.column('summary', width=250)
-                    self.tree.column('name', width=180)
-                else:
-                    self.tree.column('summary', width=200)
-                    self.tree.column('name', width=150)
+        self.log_text = tk.Text(log_frame, height=7, wrap="none",
+                                font=(self.font_mono, 9),
+                                relief="flat", bd=0,
+                                highlightthickness=0, padx=4, pady=4)
+        self.log_text.grid(row=0, column=0, sticky="nswe")
+        lsb = ttk.Scrollbar(log_frame, orient="vertical",
+                             command=self.log_text.yview)
+        lsb.grid(row=0, column=1, sticky="ns")
+        self.log_text.configure(yscrollcommand=lsb.set)
 
-    # ============== Target Management ==============
-    def refresh_targets(self):
-        """Refresh target listbox"""
-        if not hasattr(self, 'target_listbox'):
+        return wrap
+
+    # ── targets management ─────────────────────────────────────────────────────
+    def _refresh_targets(self):
+        if not hasattr(self, "target_listbox"):
             return
-            
         self.target_listbox.delete(0, tk.END)
-        for i, s in enumerate(self.servers):
-            icon = '🟢' if s.get('last_scan_success', False) else '🔴'
-            label = f"{icon} {s['host']}:{s.get('port', 22)} - {s.get('username', 'N/A')}"
-            self.target_listbox.insert(tk.END, label)
-        
-        # Update count (safely check if widget exists)
-        if hasattr(self, 'target_count_label'):
-            self.target_count_label.config(text=str(len(self.servers)))
+        t = self.t
+        for s in self.servers:
+            ok = s.get("last_scan_success")
+            dot = "●" if ok else ("○" if "last_scan" in s else "·")
+            self.target_listbox.insert(
+                tk.END, f"  {dot}  {s['host']}  ·  {s.get('username', '?')}")
+            color = t["success"] if ok else (t["danger"] if "last_scan" in s else t["text2"])
+            self.target_listbox.itemconfig(tk.END, fg=color)
+        if hasattr(self, "ov_targets_lbl"):
+            self.ov_targets_lbl.config(text=str(len(self.servers)))
 
-    def on_target_select(self, event):
-        """Handle target selection"""
+    def on_target_select(self, _e):
         sel = self.target_listbox.curselection()
         if not sel:
-            self.target_info_label.config(text='Select a target to view details')
+            self.target_detail_label.config(text="Select a target.")
             return
-        
-        idx = sel[0]
-        server = self.servers[idx]
-        
-        info = f"Host: {server['host']}\n"
-        info += f"Port: {server.get('port', 22)}\n"
-        info += f"Username: {server.get('username', 'N/A')}\n"
-        info += f"Auth: {'Private Key' if server.get('pkey') else 'Password'}\n"
-        
-        if 'last_scan' in server:
-            info += f"\nLast Scan: {server['last_scan']}\n"
-            info += f"Status: {'✅ Success' if server.get('last_scan_success') else '❌ Failed'}"
-        
-        self.target_info_label.config(text=info)
+        s = self.servers[sel[0]]
+        auth = "Private key" if s.get("pkey") else "Password"
+        info = f"Host:  {s['host']}\nPort:  {s.get('port', 22)}\nUser:  {s.get('username', '?')}\nAuth:  {auth}"
+        if "last_scan" in s:
+            info += f"\n\nLast scan: {s['last_scan']}"
+            info += f"\nResult:    {'OK' if s.get('last_scan_success') else 'Failed'}"
+        self.target_detail_label.config(text=info)
 
     def open_add_remote(self):
-        """Open dialog to add remote target"""
-        dlg = RemoteDialog(self.master)
+        dlg = RemoteDialog(self.master, theme=self.t)
         self.master.wait_window(dlg.top)
         if dlg.result:
             self.servers.append(dlg.result)
-            self.refresh_targets()
-            self.log(f"✅ Added remote {dlg.result['host']}")
-            self.save_config()
+            self._refresh_targets()
+            self.log("info", f"Added remote {dlg.result['host']}")
+            self.save_config(silent=True)
 
     def edit_selected_target(self):
-        """Edit selected remote target"""
         sel = self.target_listbox.curselection()
         if not sel:
-            messagebox.showinfo('Edit Target', 'Select a target to edit')
+            messagebox.showinfo("Edit Target", "Select a target first.")
             return
-        
         idx = sel[0]
-        server = self.servers[idx]
-        
-        dlg = RemoteDialog(self.master, edit_data=server)
+        dlg = RemoteDialog(self.master, edit_data=self.servers[idx], theme=self.t)
         self.master.wait_window(dlg.top)
         if dlg.result:
             self.servers[idx] = dlg.result
-            self.refresh_targets()
-            self.log(f"✅ Updated remote {dlg.result['host']}")
-            self.save_config()
+            self._refresh_targets()
+            self.log("info", f"Updated {dlg.result['host']}")
+            self.save_config(silent=True)
 
     def remove_selected_target(self):
-        """Remove selected remote target"""
         sel = self.target_listbox.curselection()
         if not sel:
-            messagebox.showinfo('Remove Target', 'Select a target to remove')
+            messagebox.showinfo("Remove Target", "Select a target first.")
             return
-        
-        indices = sorted(sel, reverse=True)
-        hosts = [self.servers[i]['host'] for i in indices]
-        
-        if messagebox.askyesno('Confirm', f"Remove {len(indices)} target(s)?\n\n" + '\n'.join(hosts)):
-            for idx in indices:
-                self.servers.pop(idx)
-            self.refresh_targets()
-            self.log(f"🗑️ Removed {len(indices)} target(s)")
-            self.save_config()
+        hosts = [self.servers[i]["host"] for i in sel]
+        if messagebox.askyesno("Remove", f"Remove {len(sel)} target(s)?\n\n" + "\n".join(hosts)):
+            for i in sorted(sel, reverse=True):
+                self.servers.pop(i)
+            self._refresh_targets()
+            self.log("info", f"Removed {len(sel)} target(s)")
+            self.save_config(silent=True)
 
-    # ============== Scanning ==============
-    def scan_selected_remote(self):
-        """Scan selected remote target"""
+    # ── scanning ───────────────────────────────────────────────────────────────
+    def scan_selected(self):
         sel = self.target_listbox.curselection()
         if not sel:
-            messagebox.showinfo('Scan Remote', 'Select a target to scan')
+            messagebox.showinfo("Scan", "Select a target first.")
             return
-        
-        for idx in sel:
-            conf = self.servers[idx]
-            self.log(f"🔍 Scanning remote {conf['host']}...")
-            threading.Thread(target=self._scan_remote_worker, args=(conf, idx), 
-                           daemon=True).start()
+        for i in sel:
+            self.log("info", f"Scanning {self.servers[i]['host']}…")
+            threading.Thread(target=self._scan_worker,
+                             args=(self.servers[i], i), daemon=True).start()
 
-    def scan_all_targets(self):
-        """Scan all configured targets"""
+    def scan_all(self):
         if not self.servers:
-            messagebox.showinfo('Scan All', 'No targets configured')
+            messagebox.showinfo("Scan All", "No targets configured.")
             return
-        
-        self.log(f"🔍 Scanning all {len(self.servers)} target(s)...")
-        for idx, server in enumerate(self.servers):
-            threading.Thread(target=self._scan_remote_worker, args=(server, idx), 
-                           daemon=True).start()
+        self.log("info", f"Scanning {len(self.servers)} target(s)…")
+        for i, s in enumerate(self.servers):
+            threading.Thread(target=self._scan_worker,
+                             args=(s, i), daemon=True).start()
 
-    def _scan_remote_worker(self, conf, idx):
-        """Worker thread for remote scanning"""
+    def _scan_worker(self, conf, idx):
         try:
-            # First get Java processes
-            out, err = ssh_run(conf['host'], conf['username'], 
-                             password=conf.get('password'), 
-                             pkey_path=conf.get('pkey'),
-                             port=conf.get('port', 22))
-            
+            out, err = ssh_run(conf["host"], conf["username"],
+                               password=conf.get("password"),
+                               pkey_path=conf.get("pkey"),
+                               port=conf.get("port", 22))
             if err:
-                self.result_queue.put(('scan_remote_error', 
-                                      {'host': conf['host'], 'error': err, 'idx': idx}))
+                self.result_queue.put(("scan_error",
+                                       {"host": conf["host"], "error": err, "idx": idx}))
                 return
-            
-            items = parse_remote_ps_output(out)
-            
-            # Try to get listening ports for better detection
+            items = parse_remote_ps(out)
             try:
-                pid_port_map = get_listening_ports(
-                    conf['host'], conf['username'],
-                    password=conf.get('password'),
-                    pkey_path=conf.get('pkey'),
-                    port=conf.get('port', 22)
-                )
-                
-                # Enhance items with listening ports
-                for item in items:
-                    if not item.get('port') and item['pid'] in pid_port_map:
-                        item['port'] = pid_port_map[item['pid']]
-                        self.log(f"🔍 Detected port {item['port']} for PID {item['pid']} via netstat")
-            except Exception as e:
-                self.log(f"⚠️ Could not detect listening ports: {str(e)[:50]}")
-            
-            self.result_queue.put(('scan_remote', 
-                                  {'host': conf['host'], 'items': items, 'idx': idx}))
-            self.stats['total_scans'] += 1
+                pm = get_listening_ports(conf["host"], conf["username"],
+                                         password=conf.get("password"),
+                                         pkey_path=conf.get("pkey"),
+                                         port=conf.get("port", 22))
+                for it in items:
+                    if not it.get("port") and it["pid"] in pm:
+                        it["port"] = pm[it["pid"]]
+            except Exception:
+                pass
+            self.result_queue.put(("scan_ok",
+                                   {"host": conf["host"], "items": items, "idx": idx}))
+            self.stats["scans"] += 1
         except Exception as e:
-            self.result_queue.put(('error', f"Remote scan error for {conf['host']}: {e}"))
+            self.result_queue.put(("error", f"Scan error {conf['host']}: {e}"))
 
-    # ============== Probing ==============
-    def probe_selected(self):
-        """Probe selected items"""
+    # ── probing ────────────────────────────────────────────────────────────────
+    def _probe_selected(self):
         sel = self.tree.selection()
         if not sel:
-            messagebox.showinfo('Probe', 'Select services to probe')
+            messagebox.showinfo("Probe", "Select services to probe.")
             return
-        
-        rows = [self.tree.item(iid)['values'] for iid in sel]
-        self.log(f"🔍 Probing {len(rows)} selected service(s)...")
-        
-        probed_count = 0
-        for row in rows:
-            target, pid, name, port = row[0], row[1], row[2], row[3]
-            
-            if not port:
-                self.log(f"⚠️ Skipping {name} (PID {pid}) - no port detected")
+        svcs = SERVICES + self.custom_services
+        for iid in sel:
+            try:
+                vals = self.tree.item(iid)["values"]
+            except tk.TclError:
                 continue
-            
-            self.log(f"🔍 Probing {name} on {target}:{port}...")
+            if len(vals) < 4:
+                continue
+            target, port = vals[0], vals[3]
+            if not port or port == "N/A":
+                continue
             base = f"http://{target}:{port}"
-            services = SERVICES + self.custom_services
-            
-            for svc in services:
-                threading.Thread(target=self._probe_worker, 
-                               args=(target, port, svc, base), 
-                               daemon=True).start()
-                probed_count += 1
-        
-        self.log(f"✅ Started {probed_count} probe(s)")
+            for svc in svcs:
+                threading.Thread(target=self._probe_worker,
+                                 args=(iid, target, port, svc, base),
+                                 daemon=True).start()
 
     def probe_all(self):
-        """Probe all discovered services"""
-        all_items = self.tree.get_children()
-        if not all_items:
-            messagebox.showinfo('Probe All', 'No services discovered yet')
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("Probe All", "No services discovered yet.")
             return
-        
-        self.log(f"🔍 Probing all {len(all_items)} discovered service(s)...")
-        
-        probed_count = 0
-        for iid in all_items:
-            vals = self.tree.item(iid)['values']
-            target, port = vals[0], vals[3]
-            
-            if not port:
+        svcs = SERVICES + self.custom_services
+        count = 0
+        for iid in items:
+            try:
+                vals = self.tree.item(iid)["values"]
+            except tk.TclError:
                 continue
-            
+            if len(vals) < 4:
+                continue
+            target, port = vals[0], vals[3]
+            if not port or port == "N/A":
+                continue
+            count += 1
             base = f"http://{target}:{port}"
-            services = SERVICES + self.custom_services
-            
-            for svc in services:
-                threading.Thread(target=self._probe_worker, 
-                               args=(target, port, svc, base), 
-                               daemon=True).start()
-                probed_count += 1
-        
-        self.log(f"✅ Started {probed_count} probe(s) for {len([v for v in [self.tree.item(i)['values'] for i in all_items] if v[3]])} services with ports")
+            for svc in svcs:
+                threading.Thread(target=self._probe_worker,
+                                 args=(iid, target, port, svc, base),
+                                 daemon=True).start()
+        if count == 0:
+            self.log("info", "Probe all: no rows with a detected port.")
+        else:
+            self.log("info", f"Probing {count} × {len(svcs)} endpoints…")
 
-    def _probe_worker(self, target, port, svc, base):
-        """Worker thread for probing"""
+    def _probe_worker(self, iid, target, port, svc, base):
         try:
             res = probe_url(base, svc)
-            self.result_queue.put(('probe', {
-                'target': target,
-                'port': port,
-                'svc': svc['name'],
-                'res': res,
-                'critical': svc.get('critical', False)
+            self.result_queue.put(("probe", {
+                "iid": iid, "target": target, "port": port,
+                "svc": svc["name"], "res": res,
+                "critical": svc.get("critical", False),
             }))
-            self.stats['total_probes'] += 1
-            if not res['ok']:
-                self.stats['failed_probes'] += 1
+            self.stats["probes"] += 1
+            if not res["ok"]:
+                self.stats["failed"] += 1
         except Exception as e:
-            self.result_queue.put(('error', f"Probe error: {e}"))
+            self.result_queue.put(("error", f"Probe error: {e}"))
 
-    # ============== Polling ==============
+    # ── polling ────────────────────────────────────────────────────────────────
     def toggle_polling(self):
-        """Toggle automatic polling"""
         if self._polling:
             self._polling = False
-            self.poll_button.config(text='▶️ Start Polling')
-            self.polling_indicator.config(text='⏸️ Idle', style='Status.TLabel')
-            self.log("⏸️ Stopped polling")
-        else:
-            try:
-                interval = int(self.poll_interval_var.get())
-                if interval < 5:
-                    messagebox.showwarning('Polling', 'Minimum interval is 5 seconds')
-                    return
-                self._poll_interval = interval
-            except ValueError:
-                messagebox.showerror('Polling', 'Invalid interval value')
-                return
-            
-            self._polling = True
-            self.poll_button.config(text='⏸️ Stop Polling')
-            self.polling_indicator.config(text=f'▶️ Active ({self._poll_interval}s)', 
-                                         style='Success.TLabel')
-            threading.Thread(target=self._poll_loop, daemon=True).start()
-            self.log(f"▶️ Started polling (every {self._poll_interval}s)")
+            self.poll_btn.config(text="▶  Start polling")
+            self.poll_indicator.config(text="⏸  Idle")
+            self.log("info", "Polling stopped")
+            return
+        try:
+            interval = int(self.poll_interval_var.get())
+        except ValueError:
+            messagebox.showerror("Polling", "Invalid interval.")
+            return
+        if interval < 5:
+            messagebox.showwarning("Polling", "Minimum interval is 5 seconds.")
+            return
+        self._poll_interval = interval
+        self._polling = True
+        self.poll_btn.config(text="■  Stop polling", style="Danger.TButton")
+        self.poll_indicator.config(text=f"● Polling every {interval}s")
+        threading.Thread(target=self._poll_loop, daemon=True).start()
+        self.log("info", f"Polling started every {interval}s")
+
+    def _on_interval_change(self, *_):
+        if not self._polling:
+            return
+        try:
+            v = int(self.poll_interval_var.get())
+        except ValueError:
+            return
+        if v >= 5 and v != self._poll_interval:
+            self._poll_interval = v
+            self.log("info", f"Poll interval updated to {v}s")
 
     def _poll_loop(self):
-        """Main polling loop"""
+        next_at = time.time()
         while self._polling:
-            all_items = self.tree.get_children()
-            if all_items:
-                for iid in all_items:
-                    if not self._polling:
-                        break
-                    
-                    vals = self.tree.item(iid)['values']
-                    target, port = vals[0], vals[3]
-                    
-                    if port:
-                        base = f"http://{target}:{port}"
-                        services = SERVICES + self.custom_services
-                        
-                        for svc in services:
-                            if not self._polling:
-                                break
-                            res = probe_url(base, svc)
-                            self.result_queue.put(('probe_update', {
-                                'iid': iid,
-                                'target': target,
-                                'port': port,
-                                'svc': svc['name'],
-                                'res': res,
-                                'critical': svc.get('critical', False)
-                            }))
-            
-            # Sleep in small intervals
-            for _ in range(self._poll_interval * 2):
-                if not self._polling:
-                    break
-                threading.Event().wait(0.5)
+            now = time.time()
+            if now >= next_at:
+                self.result_queue.put(("poll_tick", None))
+                next_at = now + max(5, self._poll_interval)
+            remaining = max(0, int(next_at - now))
+            self.result_queue.put(("poll_countdown", remaining))
+            threading.Event().wait(0.5)
 
-    # ============== Queue Processing ==============
-    def _start_queue_poller(self):
-        """Start processing result queue"""
+    def _run_poll_cycle(self):
+        if not self._polling:
+            return
+        seen = set()
+        targets = []
+        for iid in self.tree.get_children():
+            try:
+                vals = self.tree.item(iid).get("values", [])
+                if len(vals) < 4:
+                    continue
+                target, port = vals[0], vals[3]
+                if not port or port in ("N/A", "—"):
+                    continue
+                key = (str(target), str(port))
+                if key in seen:
+                    continue
+                seen.add(key)
+                targets.append((iid, str(target), str(port)))
+            except tk.TclError:
+                continue
+        if not targets:
+            return
+        svcs = SERVICES + self.custom_services
+        self._poll_inflight = len(targets) * len(svcs)
+        self.log("info", f"Poll: {len(targets)} × {len(svcs)} probes")
+        for iid, target, port in targets:
+            base = f"http://{target}:{port}"
+            for svc in svcs:
+                threading.Thread(target=self._poll_probe_worker,
+                                 args=(iid, target, port, svc, base),
+                                 daemon=True).start()
+
+    def _poll_probe_worker(self, iid, target, port, svc, base):
+        try:
+            res = probe_url(base, svc)
+        except Exception as e:
+            res = {"ok": False, "status_code": None, "summary": str(e),
+                   "url": base + svc["path"], "response_time": None,
+                   "timestamp": datetime.now().isoformat()}
+        self.result_queue.put(("probe_update", {
+            "iid": iid, "target": target, "port": port,
+            "svc": svc["name"], "res": res,
+            "critical": svc.get("critical", False),
+        }))
+        self.result_queue.put(("poll_done", None))
+
+    # ── queue processing ───────────────────────────────────────────────────────
+    def _start_queue_loop(self):
         def poll():
             try:
-                processed = 0
-                while processed < 50:  # Batch process
+                for _ in range(50):
                     try:
                         ev, payload = self.result_queue.get_nowait()
-                        processed += 1
                     except queue.Empty:
                         break
-                    
                     try:
-                        if ev == 'scan_remote':
-                            self._handle_remote_scan(payload)
-                        elif ev == 'scan_remote_error':
+                        if ev == "scan_ok":
+                            self._handle_scan(payload)
+                        elif ev == "scan_error":
                             self._handle_scan_error(payload)
-                        elif ev == 'probe':
-                            self._handle_probe_result(payload)
-                        elif ev == 'probe_update':
-                            self._handle_probe_result(payload, update=True)
-                        elif ev == 'history_success':
-                            self._handle_history_success(payload)
-                        elif ev == 'history_error':
-                            self._handle_history_error(payload)
-                        elif ev == 'error':
-                            self.log(f"❌ Error: {payload}")
+                        elif ev in ("probe", "probe_update"):
+                            self._handle_probe(payload, update=(ev == "probe_update"))
+                        elif ev == "poll_tick":
+                            self._run_poll_cycle()
+                        elif ev == "poll_countdown":
+                            self._poll_next_in = payload
+                            self._update_poll_indicator()
+                        elif ev == "poll_done":
+                            if self._poll_inflight > 0:
+                                self._poll_inflight -= 1
+                        elif ev == "history_ok":
+                            self._open_history_dialog(payload)
+                        elif ev == "history_err":
+                            self.log("err", f"{payload['host']}: {payload['error']}")
+                        elif ev == "error":
+                            self.log("err", payload)
                     except Exception as e:
-                        self.log(f"❌ Queue processing error: {e}")
+                        self.log("err", f"Queue error: {e}")
             finally:
-                self.update_status_counts()
-                self.update_stats()
+                self._update_status_counts()
+                self._update_stats_label()
                 self.after(200, poll)
-        
         poll()
 
-    def show_alert(self, url, result):
-        """Show alert for critical service down"""
-        try:
-            self.master.bell()
-            # Flash the window
-            self.master.attributes('-topmost', True)
-            self.after(2000, lambda: self.master.attributes('-topmost', False))
-        except:
-            pass
+    def _update_poll_indicator(self):
+        if not self._polling:
+            return
+        if self._poll_inflight > 0:
+            txt = f"● Polling  ·  {self._poll_inflight} in flight"
+        else:
+            txt = f"● Polling  ·  next in {self._poll_next_in}s"
+        self.poll_indicator.config(text=txt)
 
-    def _handle_remote_scan(self, payload):
-        """Handle remote scan results"""
-        host = payload['host']
-        items = payload['items']
-        idx = payload.get('idx')
-        
-        # Update server status
+    def _handle_scan(self, payload):
+        host, items, idx = payload["host"], payload["items"], payload.get("idx")
         if idx is not None and idx < len(self.servers):
-            self.servers[idx]['last_scan'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            self.servers[idx]['last_scan_success'] = True
-        
-        # Log to server history
-        self._add_server_history(host, 'scan', f'Scan completed: {len(items)} processes found')
-        
-        # Clear old entries for this host
+            self.servers[idx]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.servers[idx]["last_scan_success"] = True
         self._clear_rows_for_target(host)
-        
-        ports_found = 0
-        up_count = 0
-        down_count = 0
-        
-        # Add items directly to tree
         for it in items:
-            port = it.get('port', '')
-            name = it.get('name', 'java-process')
-            pid = it.get('pid', '')
-            
-            # Build summary
-            summary = it.get('jar', '') or it.get('main_class', '') or 'Java Process'
-            
-            # STATUS BASED ON PORT DETECTION
-            if port:
-                status = '🟢 UP'
-                ports_found += 1
-                up_count += 1
-                tags = ('up',)
-                # Log service up
-                self._add_server_history(host, 'status_change', 
-                                        f'Service UP: {name} on port {port}',
-                                        {'pid': pid, 'port': port, 'name': name})
-            else:
-                status = '🔴 DOWN'
-                down_count += 1
-                tags = ('down',)
-                # Log service down
-                self._add_server_history(host, 'status_change', 
-                                        f'Service DOWN: {name} (no port detected)',
-                                        {'pid': pid, 'name': name})
-            
-            # INSERT with status
-            self.tree.insert('', 'end', values=(
-                host,           # Target
-                pid,            # PID
-                name,           # Application
-                port or 'N/A',  # Port
-                '',             # Service
-                status,         # Status - UP if port found, DOWN if not
-                '',             # Response Time
-                datetime.now().strftime('%H:%M:%S'),  # Last Check
-                summary         # Details
-            ), tags=tags)
-        
-        # Configure tag colors with professional scheme
-        self.tree.tag_configure('up', 
-                               background=COLORS['success_light'], 
-                               foreground=COLORS['success_dark'])
-        self.tree.tag_configure('down', 
-                               background=COLORS['error_light'], 
-                               foreground=COLORS['error_dark'])
-        
-        # Log
-        total = len(items)
-        self.log(f"✅ {host}: {total} processes - {up_count} UP (port detected), {down_count} DOWN (no port)")
-        
-        # Update counts
-        self.refresh_targets()
-        if hasattr(self, 'service_count_label'):
-            self.service_count_label.config(text=str(len(self.tree.get_children())))
-        
-        self.update_status_counts()
+            port = it.get("port", "")
+            name = it.get("name", "java-process")
+            status = "●  UP" if port else "○  IDLE"
+            tag = "up" if port else "idle"
+            summary = it.get("jar") or it.get("main_class") or "Java process"
+            self.tree.insert("", "end", values=(
+                host, it.get("pid", ""), name, port or "N/A",
+                "", status, "", datetime.now().strftime("%H:%M:%S"), summary
+            ), tags=(tag,))
+        self.log("ok", f"{host}: {len(items)} process(es) found")
+        self._refresh_targets()
+        if hasattr(self, "ov_services_lbl"):
+            self.ov_services_lbl.config(text=str(len(self.tree.get_children())))
 
     def _handle_scan_error(self, payload):
-        """Handle scan errors"""
-        host = payload['host']
-        error = payload['error']
-        idx = payload.get('idx')
-        
+        host, err, idx = payload["host"], payload["error"], payload.get("idx")
         if idx is not None and idx < len(self.servers):
-            self.servers[idx]['last_scan'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            self.servers[idx]['last_scan_success'] = False
-        
-        # Log to server history
-        self._add_server_history(host, 'error', f'Scan failed: {error[:100]}', 
-                                {'error': error})
-        
-        self.log(f"❌ {host} scan failed: {error[:100]}")
-        self.refresh_targets()
-    
-    def _handle_history_success(self, payload):
-        """Handle successful history fetch"""
-        host = payload['host']
-        history = payload['history']
-        server_config = payload.get('server_config')  # ← ADD THIS LINE
-        
-        self.log(f"✅ {host} command history retrieved")
-        
-        # Show in dialog
-        UnixHistoryDialog(self.master, host, history, server_config)  # ← ADD server_config
-        
-    def _handle_history_error(self, payload):
-        """Handle history fetch error"""
-        host = payload['host']
-        error = payload['error']
-        
-        self.log(f"❌ {host} history fetch failed: {error}")
-        messagebox.showerror('History Error', 
-                           f'Could not retrieve command history from {host}:\n\n{error}')
+            self.servers[idx]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.servers[idx]["last_scan_success"] = False
+        self.log("err", f"{host} scan failed: {err[:80]}")
+        self._refresh_targets()
 
-    def _handle_probe_result(self, payload, update=False):
-        """Handle probe results"""
-        target = payload['target']
-        port = payload['port']
-        svc = payload['svc']
-        res = payload['res']
-        critical = payload.get('critical', False)
-        
-        # Store in history
-        url = res['url']
+    def _handle_probe(self, payload, update=False):
+        target = payload["target"]
+        port   = payload["port"]
+        svc    = payload["svc"]
+        res    = payload["res"]
+        critical = payload.get("critical", False)
+        hint_iid = payload.get("iid")
+
+        url = res["url"]
         self.history[url].append(res)
         if len(self.history[url]) > MAX_HISTORY_ENTRIES:
             self.history[url] = self.history[url][-MAX_HISTORY_ENTRIES:]
-        
-        # Check for state change
-        prev_state = self.alert_state.get(url, {}).get('last_status')
-        if prev_state is not None and prev_state != res['ok']:
-            status_text = "UP ✅" if res['ok'] else "DOWN ⚠️"
-            self.log(f"🚨 ALERT: {svc} @ {target}:{port} is now {status_text}!")
-            if not res['ok'] and critical:
-                self.show_alert(url, res)
-        
-        self.alert_state[url] = {
-            'last_status': res['ok'],
-            'timestamp': res['timestamp']
-        }
-        
-        # Update tree
-        for iid in self.tree.get_children():
-            vals = self.tree.item(iid)['values']
-            if str(vals[0]) == str(target) and str(vals[3]) == str(port):
-                status = '🟢 UP' if res['ok'] else '🔴 DOWN'
-                response_time = f"{res.get('response_time', 0):.0f}ms" if res.get('response_time') else 'N/A'
-                last_check = datetime.now().strftime('%H:%M:%S')
-                
-                self.tree.set(iid, 'service', svc)
-                self.tree.set(iid, 'status', status)
-                self.tree.set(iid, 'response_time', response_time)
-                self.tree.set(iid, 'last_check', last_check)
-                self.tree.set(iid, 'summary', res.get('summary', '')[:60])
-                
-                # Apply tags
-                if res['ok']:
-                    self.tree.item(iid, tags=('up',))
-                elif res.get('response_time') and res['response_time'] > 2000:
-                    self.tree.item(iid, tags=('warning',))
+
+        prev = self.alert_state.get(url, {}).get("last_status")
+        if prev is not None and prev != res["ok"]:
+            label = "UP" if res["ok"] else "DOWN"
+            self.log("info", f"State change: {svc} @ {target}:{port} → {label}")
+            if not res["ok"] and critical:
+                try:
+                    self.master.bell()
+                except Exception:
+                    pass
+        self.alert_state[url] = {"last_status": res["ok"],
+                                  "timestamp": res["timestamp"]}
+
+        # find row
+        target_iid = None
+        if hint_iid and self.tree.exists(hint_iid):
+            target_iid = hint_iid
+        else:
+            for iid in self.tree.get_children():
+                try:
+                    vals = self.tree.item(iid)["values"]
+                    if (len(vals) > 3 and str(vals[0]) == str(target)
+                            and str(vals[3]) == str(port)):
+                        target_iid = iid
+                        break
+                except tk.TclError:
+                    continue
+
+        if target_iid:
+            try:
+                rt_raw = res.get("response_time")
+                rt = f"{rt_raw:.0f} ms" if rt_raw is not None else "—"
+                status = "●  UP" if res["ok"] else "○  DOWN"
+                self.tree.set(target_iid, "service",       svc)
+                self.tree.set(target_iid, "status",        status)
+                self.tree.set(target_iid, "response_time", rt)
+                self.tree.set(target_iid, "last_check",    datetime.now().strftime("%H:%M:%S"))
+                self.tree.set(target_iid, "summary",       res.get("summary", "")[:60])
+                if res["ok"]:
+                    tag = "up"
+                elif rt_raw and rt_raw > 2000:
+                    tag = "warning"
                 else:
-                    self.tree.item(iid, tags=('down',))
-                
-                break
-        
+                    tag = "down"
+                self.tree.item(target_iid, tags=(tag,))
+            except tk.TclError:
+                pass
+
         if not update:
-            status_icon = "✅" if res['ok'] else "❌"
-            rt = f" ({res.get('response_time', 0):.0f}ms)" if res.get('response_time') else ""
-            self.log(f"{status_icon} {svc} @ {target}:{port}{rt}")
+            icon = "✓" if res["ok"] else "✗"
+            rt = (f" ({res.get('response_time', 0):.0f}ms)"
+                  if res.get("response_time") else "")
+            tag = "ok" if res["ok"] else "err"
+            self.log(tag, f"{icon} {svc} @ {target}:{port}{rt}")
 
-    def _add_server_history(self, host, event_type, message, details=None):
-        """Add event to server history"""
-        event = {
-            'timestamp': datetime.now().isoformat(),
-            'type': event_type,  # 'scan', 'connect', 'error', 'status_change'
-            'message': message,
-            'details': details
-        }
-        
-        self.server_history[host].append(event)
-        
-        # Keep only last N events
-        if len(self.server_history[host]) > self.max_server_history:
-            self.server_history[host] = self.server_history[host][-self.max_server_history:]
-        """Show alert for critical service down"""
+    # ── filter / sort / display ────────────────────────────────────────────────
+    def _apply_filter(self):
+        search = self.search_var.get().lower() if hasattr(self, "search_var") else ""
+        show_all = self.show_all_var.get() if hasattr(self, "show_all_var") else True
+        for iid in self.tree.get_children(""):
+            try:
+                vals = self.tree.item(iid)["values"]
+                has_port = (len(vals) > 3
+                            and str(vals[3]).strip()
+                            and str(vals[3]) not in ("N/A", "—"))
+                show = True
+                if not show_all and not has_port:
+                    show = False
+                if show and search:
+                    if search not in " ".join(str(v).lower() for v in vals):
+                        show = False
+                if show:
+                    self.tree.reattach(iid, "", "end")
+                else:
+                    self.tree.detach(iid)
+            except Exception:
+                continue
+        self._update_status_counts()
+
+    def _sort_tree(self, col):
+        items = [(self.tree.set(iid, col), iid)
+                 for iid in self.tree.get_children("")]
+        rev = self._sort_state.get(col, False)
         try:
-            self.master.bell()
-            # Flash the window
-            self.master.attributes('-topmost', True)
-            self.after(2000, lambda: self.master.attributes('-topmost', False))
-        except:
-            pass
+            items.sort(
+                key=lambda x: float(
+                    re.sub(r"[^\d.]", "", str(x[0])) or "0"),
+                reverse=rev)
+        except Exception:
+            items.sort(reverse=rev)
+        for i, (_, iid) in enumerate(items):
+            self.tree.move(iid, "", i)
+        self._sort_state[col] = not rev
 
-    # ============== UI Helpers ==============
+    def _update_status_counts(self):
+        up = down = idle = 0
+        for iid in self.tree.get_children(""):
+            try:
+                s = str(self.tree.set(iid, "status"))
+                if "UP" in s:
+                    up += 1
+                elif "DOWN" in s:
+                    down += 1
+                else:
+                    idle += 1
+            except Exception:
+                idle += 1
+        self.pill_up_var.set(f"● {up} up")
+        self.pill_down_var.set(f"● {down} down")
+        self.pill_idle_var.set(f"● {idle} idle")
+
+    def _update_stats_label(self):
+        self.stats_label.config(
+            text=(f"Scans: {self.stats['scans']}  ·  "
+                  f"Probes: {self.stats['probes']}  ·  "
+                  f"Failed: {self.stats['failed']}"))
+
     def _clear_rows_for_target(self, target):
-        """Clear tree rows for specific target"""
         for iid in list(self.tree.get_children()):
-            vals = self.tree.item(iid)['values']
-            if vals[0] == target:
-                self.tree.delete(iid)
+            try:
+                if self.tree.item(iid)["values"][0] == target:
+                    self.tree.delete(iid)
+            except Exception:
+                pass
 
     def clear_results(self):
-        """Clear all results"""
-        if messagebox.askyesno('Clear Results', 'Clear all discovered services?'):
+        if messagebox.askyesno("Clear", "Clear all discovered services?"):
             self.tree.delete(*self.tree.get_children())
-            self.log("🗑️ Cleared all results")
-            self.update_status_counts()
+            self.log("info", "Cleared all results")
+            self._update_status_counts()
 
-    def apply_filter(self):
-        """Apply search filter to tree"""
-        search_text = self.search_var.get().lower() if hasattr(self, 'search_var') else ''
-        show_all = self.show_all_var.get() if hasattr(self, 'show_all_var') else True
-        
-        visible_count = 0
-        
-        # Get ALL children including detached
-        all_iids = self.tree.get_children('')
-        
-        for iid in all_iids:
-            try:
-                vals = self.tree.item(iid)['values']
-                if not vals:
-                    continue
-                
-                # Port is column index 3
-                has_port = bool(str(vals[3]).strip()) if len(vals) > 3 else False
-                
-                should_show = True
-                
-                # Filter by show_all checkbox
-                if not show_all and not has_port:
-                    should_show = False
-                
-                # Filter by search text
-                if should_show and search_text:
-                    text = ' '.join(str(v).lower() for v in vals)
-                    if search_text not in text:
-                        should_show = False
-                
-                # Apply visibility
-                if should_show:
-                    # Reattach to make visible
-                    try:
-                        self.tree.reattach(iid, '', 'end')
-                        visible_count += 1
-                    except tk.TclError:
-                        # Already attached, just count it
-                        visible_count += 1
-                else:
-                    # Detach to hide
-                    try:
-                        self.tree.detach(iid)
-                    except tk.TclError:
-                        pass
-                        
-            except Exception as e:
-                continue
-        
-        # Update counts
-        self.update_status_counts()
-        
-        return visible_count
+    # ── log ────────────────────────────────────────────────────────────────────
+    def log(self, level: str, text: str):
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.log_text.insert("end", f"[{ts}]  ", "ts")
+        self.log_text.insert("end", f"{text}\n", level)
+        self.log_text.see("end")
+        lines = int(self.log_text.index("end-1c").split(".")[0])
+        if lines > 600:
+            self.log_text.delete("1.0", "100.0")
 
-    def refresh_display(self):
-        """Refresh the display"""
-        self.apply_filter()
-        self.update_status_counts()
-        self.update_stats()
-        self.log("🔄 Display refreshed")
-
-    def sort_tree(self, col):
-        """Sort tree by column"""
-        items = [(self.tree.set(iid, col), iid) for iid in self.tree.get_children('')]
-        
-        # Try numeric sort first
-        try:
-            items.sort(key=lambda x: float(x[0].replace('ms', '').replace('🟢', '').replace('🔴', '').strip()))
-        except (ValueError, AttributeError):
-            items.sort()
-        
-        for index, (val, iid) in enumerate(items):
-            self.tree.move(iid, '', index)
-
-    def update_status_counts(self):
-        """Update status count labels"""
-        up_count = 0
-        down_count = 0
-        unknown_count = 0
-        
-        # Only count visible items
-        for iid in self.tree.get_children(''):
-            try:
-                status = self.tree.set(iid, 'status')
-                if '🟢' in str(status):
-                    up_count += 1
-                elif '🔴' in str(status):
-                    down_count += 1
-                else:
-                    unknown_count += 1
-            except:
-                unknown_count += 1
-        
-        if hasattr(self, 'status_up_label'):
-            self.status_up_label.config(text=f'🟢 {up_count}')
-        if hasattr(self, 'status_down_label'):
-            self.status_down_label.config(text=f'🔴 {down_count}')
-        if hasattr(self, 'status_unknown_label'):
-            self.status_unknown_label.config(text=f'⚪ {unknown_count}')
-
-    def update_stats(self):
-        """Update statistics display"""
-        stats_text = (f"Scans: {self.stats['total_scans']} | "
-                     f"Probes: {self.stats['total_probes']} | "
-                     f"Failed: {self.stats['failed_probes']}")
-        self.stats_label.config(text=stats_text)
-
-    def log(self, text):
-        """Add message to log with timestamp"""
-        ts = datetime.now().strftime('%H:%M:%S')
-        self.log_text.insert('end', f'[{ts}] {text}\n')
-        self.log_text.see('end')
-        
-        # Keep log size manageable
-        lines = int(self.log_text.index('end-1c').split('.')[0])
-        if lines > 500:
-            self.log_text.delete('1.0', '100.0')
-
-    # ============== Context Menu ==============
-    def show_tree_menu(self, event):
-        """Show context menu for tree"""
+    # ── context menu helpers ───────────────────────────────────────────────────
+    def _show_ctx(self, event):
         iid = self.tree.identify_row(event.y)
         if iid:
             self.tree.selection_set(iid)
-            self.tree_menu.post(event.x_root, event.y_root)
+            self.ctx.post(event.x_root, event.y_root)
 
-    def copy_url(self):
-        """Copy URL to clipboard"""
+    def _copy_url(self):
         sel = self.tree.selection()
         if sel:
-            vals = self.tree.item(sel[0])['values']
-            target, port = vals[0], vals[3]
-            if port:
-                url = f"http://{target}:{port}"
+            vals = self.tree.item(sel[0])["values"]
+            if vals[3] and vals[3] != "N/A":
+                url = f"http://{vals[0]}:{vals[3]}"
                 self.master.clipboard_clear()
                 self.master.clipboard_append(url)
-                self.log(f"📋 Copied: {url}")
+                self.log("info", f"Copied: {url}")
 
-    def open_in_browser(self):
-        """Open URL in browser"""
+    def _open_browser(self):
         sel = self.tree.selection()
         if sel:
-            vals = self.tree.item(sel[0])['values']
-            target, port = vals[0], vals[3]
-            if port:
-                url = f"http://{target}:{port}"
-                import webbrowser
+            vals = self.tree.item(sel[0])["values"]
+            if vals[3] and vals[3] != "N/A":
+                url = f"http://{vals[0]}:{vals[3]}"
                 webbrowser.open(url)
-                self.log(f"🌐 Opened: {url}")
 
-    def delete_selected(self):
-        """Delete selected tree items"""
+    def _delete_selected(self):
         sel = self.tree.selection()
-        if sel and messagebox.askyesno('Delete', f'Delete {len(sel)} item(s)?'):
+        if sel and messagebox.askyesno("Delete", f"Delete {len(sel)} item(s)?"):
             for iid in sel:
                 self.tree.delete(iid)
-            self.update_status_counts()
+            self._update_status_counts()
 
-    def view_details(self):
-        """View detailed information for selected item"""
+    def _view_details(self):
+        sel = self.tree.selection()
+        if sel:
+            DetailsDialog(self.master, self.tree.item(sel[0])["values"], theme=self.t)
+
+    def _view_item_history(self):
         sel = self.tree.selection()
         if not sel:
             return
-        
-        vals = self.tree.item(sel[0])['values']
-        details = f"""Target: {vals[0]}
-PID: {vals[1]}
-Application: {vals[2]}
-Port: {vals[3]}
-Service: {vals[4]}
-Status: {vals[5]}
-Response Time: {vals[6]}
-Last Check: {vals[7]}
-
-Details: {vals[8]}"""
-        
-        messagebox.showinfo('Service Details', details)
-
-    def view_item_history(self):
-        """View history for selected item"""
-        sel = self.tree.selection()
-        if not sel:
-            return
-        
-        vals = self.tree.item(sel[0])['values']
+        vals = self.tree.item(sel[0])["values"]
         target, port = vals[0], vals[3]
-        
-        if not port:
-            messagebox.showinfo('History', 'No port information available')
+        if not port or port == "N/A":
+            messagebox.showinfo("History", "No port info available.")
             return
-        
-        # Find matching history
-        base_url = f"http://{target}:{port}"
-        matching_history = []
-        
-        for url, entries in self.history.items():
-            if url.startswith(base_url):
-                matching_history.extend(entries[-20:])
-        
-        if not matching_history:
-            messagebox.showinfo('History', 'No history available')
+        base = f"http://{target}:{port}"
+        entries = []
+        for url, hist in self.history.items():
+            if url.startswith(base):
+                entries.extend(hist[-20:])
+        if not entries:
+            messagebox.showinfo("History", "No history available yet.")
             return
-        
-        HistoryDialog(self.master, f"{target}:{port}", matching_history)
+        HistoryDialog(self.master, f"{target}:{port}", entries, theme=self.t)
 
-    # ============== Dialogs ==============
+    # ── dialogs ────────────────────────────────────────────────────────────────
     def add_custom_service(self):
-        """Add custom service endpoint"""
-        dlg = CustomServiceDialog(self.master)
+        dlg = CustomServiceDialog(self.master, theme=self.t)
         self.master.wait_window(dlg.top)
         if dlg.result:
             self.custom_services.append(dlg.result)
-            self.log(f"✅ Added custom service: {dlg.result['name']}")
-            self.save_config()
+            self.log("info", f"Added custom service: {dlg.result['name']}")
+            self.save_config(silent=True)
 
     def show_server_history(self):
-        """Show real Unix command history from remote server"""
         sel = self.target_listbox.curselection()
-        
         if not sel:
-            messagebox.showinfo('Server History', 
-                              'Please select a server to view its command history.')
+            messagebox.showinfo("Shell", "Select a target first.")
             return
-        
-        idx = sel[0]
-        server = self.servers[idx]
-        host = server['host']
-        
-        self.log(f"📜 Fetching command history from {host}...")
-        
-        # Get history in background thread
-        threading.Thread(target=self._fetch_server_history_worker, 
-                        args=(server,), daemon=True).start()
-    
-    def _fetch_server_history_worker(self, server):
-        """Worker thread to fetch Unix history from server"""
-        try:
-            host = server['host']
-            history_output, err = get_server_history(
-                host, 
-                server['username'],
-                password=server.get('password'),
-                pkey_path=server.get('pkey'),
-                port=server.get('port', 22),
-                lines=200  # Get last 200 commands
-            )
-            
-            if err:
-                self.result_queue.put(('history_error', {
-                    'host': host,
-                    'error': err
-                }))
-            else:
-                self.result_queue.put(('history_success', {
-                    'host': host,
-                    'history': history_output,
-                    'server_config': server  # ← ADD THIS LINE
-                }))
-                
-        except Exception as e:
-            self.result_queue.put(('history_error', {
-                'host': server['host'],
-                'error': str(e)
-            }))
-    
-    def show_statistics(self):
-        """Show detailed statistics"""
-        total_services = len(self.tree.get_children())
-        up_services = sum(1 for iid in self.tree.get_children() 
-                         if '🟢' in self.tree.set(iid, 'status'))
-        down_services = sum(1 for iid in self.tree.get_children() 
-                           if '🔴' in self.tree.set(iid, 'status'))
-        
-        avg_response = 0
-        response_times = []
-        for iid in self.tree.get_children():
-            rt = self.tree.set(iid, 'response_time')
-            if rt and rt != 'N/A':
-                try:
-                    response_times.append(float(rt.replace('ms', '')))
-                except:
-                    pass
-        
-        if response_times:
-            avg_response = sum(response_times) / len(response_times)
-            min_response = min(response_times)
-            max_response = max(response_times)
+        server = self.servers[sel[0]]
+        self.log("info", f"Fetching history from {server['host']}…")
+        threading.Thread(target=self._fetch_history_worker,
+                         args=(server,), daemon=True).start()
+
+    def _fetch_history_worker(self, server):
+        out, err = get_server_history(
+            server["host"], server["username"],
+            password=server.get("password"),
+            pkey_path=server.get("pkey"),
+            port=server.get("port", 22))
+        if err:
+            self.result_queue.put(("history_err",
+                                   {"host": server["host"], "error": err}))
         else:
-            min_response = max_response = 0
-        
-        uptime_pct = (up_services / total_services * 100) if total_services > 0 else 0
-        
-        stats_text = f"""=== System Statistics ===
+            self.result_queue.put(("history_ok",
+                                   {"host": server["host"],
+                                    "history": out,
+                                    "server_config": server}))
 
-Targets
-  • Configured: {len(self.servers)}
-  • Total Services: {total_services}
+    def _open_history_dialog(self, payload):
+        UnixHistoryDialog(self.master,
+                          payload["host"],
+                          payload["history"],
+                          payload.get("server_config"),
+                          theme=self.t)
 
-Service Status
-  • Up: {up_services} ({uptime_pct:.1f}%)
-  • Down: {down_services}
-  • Unknown: {total_services - up_services - down_services}
-
-Operations
-  • Total Scans: {self.stats['total_scans']}
-  • Total Probes: {self.stats['total_probes']}
-  • Failed Probes: {self.stats['failed_probes']}
-
-Performance
-  • Avg Response: {avg_response:.1f}ms
-  • Min Response: {min_response:.1f}ms
-  • Max Response: {max_response:.1f}ms
-
-History
-  • Tracked URLs: {len(self.history)}
-  • Total Entries: {sum(len(h) for h in self.history.values())}
-"""
-        messagebox.showinfo('Statistics', stats_text)
+    def show_statistics(self):
+        items = self.tree.get_children()
+        total = len(items)
+        up   = sum(1 for i in items if "UP"   in str(self.tree.set(i, "status")))
+        down = sum(1 for i in items if "DOWN" in str(self.tree.set(i, "status")))
+        rts  = []
+        for i in items:
+            v = self.tree.set(i, "response_time")
+            if v and v not in ("—", "N/A"):
+                try:
+                    rts.append(float(re.sub(r"[^\d.]", "", v)))
+                except Exception:
+                    pass
+        avg = sum(rts)/len(rts) if rts else 0
+        uptime = up/total*100 if total else 0
+        messagebox.showinfo("Statistics",
+            f"Services:  {total}  (up: {up}, down: {down}, {uptime:.1f}% uptime)\n\n"
+            f"Scans:   {self.stats['scans']}\n"
+            f"Probes:  {self.stats['probes']}\n"
+            f"Failed:  {self.stats['failed']}\n\n"
+            f"Avg response: {avg:.0f} ms\n"
+            f"Tracked URLs: {len(self.history)}")
 
     def show_history(self):
-        """Show complete history"""
         if not self.history:
-            messagebox.showinfo('History', 'No history available')
+            messagebox.showinfo("History", "No history yet.")
             return
-        
-        all_entries = []
-        for entries in self.history.values():
-            all_entries.extend(entries[-50:])
-        
-        HistoryDialog(self.master, "All Services", all_entries)
+        entries = []
+        for h in self.history.values():
+            entries.extend(h[-50:])
+        HistoryDialog(self.master, "All Services", entries, theme=self.t)
+
+    def show_server_event_log(self):
+        if not self.server_history:
+            messagebox.showinfo("Event Log", "No events recorded yet.")
+            return
+        ServerEventsDialog(self.master, dict(self.server_history), theme=self.t)
 
     def show_about(self):
-        """Show about dialog"""
-        about_text = """PortiX
-Java Process & Service Monitor
-Version 2.0
-
-A comprehensive monitoring tool for remote Java 
-applications and services with real-time status 
-tracking and port detection.
-
-Features:
-  • Remote process scanning via SSH
-  • Automatic port detection
-  • Real-time UP/DOWN status
-  • Multi-target management
-  • Service health monitoring
-  • History tracking & analytics
-  • Modern, responsive UI
-
-Designed for production monitoring of 
-Java microservices and applications.
-
-© 2025 PortiX"""
-        
-        messagebox.showinfo('About PortiX', about_text)
+        messagebox.showinfo(f"About {APP_NAME}",
+            f"{APP_NAME} v{APP_VERSION}\n\nClean, modern Java process monitor.\n\n"
+            "SSH scanning · Port detection · HTTP probing\n"
+            "Light & dark themes · History & analytics")
 
     def show_shortcuts(self):
-        """Show keyboard shortcuts"""
-        shortcuts = """=== Keyboard Shortcuts ===
+        messagebox.showinfo("Shortcuts",
+            "Ctrl+N   Add remote target\n"
+            "Ctrl+S   Save config\n"
+            "Ctrl+E   Export results\n"
+            "F5       Scan selected\n"
+            "Ctrl+F5  Scan all\n"
+            "Ctrl+Space  Toggle polling\n"
+            "Ctrl+T   Toggle theme\n"
+            "Ctrl+I   Statistics\n"
+            "Ctrl+H   Service history\n"
+            "F1       Shortcuts\n"
+            "Ctrl+Q   Quit")
 
-File Operations
-  Ctrl+N - Add Remote Target
-  Ctrl+S - Save Configuration
-  Ctrl+E - Export Results
-  Ctrl+Q - Exit Application
-
-Scanning
-  F5 - Scan Selected Target
-  Ctrl+F5 - Scan All Targets
-  Ctrl+Space - Toggle Auto Polling
-
-View & Navigation
-  Ctrl+I - Show Statistics
-  Ctrl+H - Show History
-  Ctrl+L - Clear Log
-  Delete - Remove Selected
-  F1 - Show This Help
-
-Context Menu
-  Right-click on services for more options
-  Double-click target to scan
-"""
-        messagebox.showinfo('Keyboard Shortcuts', shortcuts)
-
-    def toggle_autoscroll(self):
-        """Toggle auto-scroll for log"""
-        # This is a placeholder - implement if needed
-        pass
-
-    # ============== Import/Export ==============
+    # ── import/export ──────────────────────────────────────────────────────────
     def export_results(self):
-        """Export current results to JSON"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension='.json',
-            filetypes=[('JSON files', '*.json'), ('All files', '*.*')],
-            initialfile=f'monitor_results_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
-        )
-        
-        if not filename:
+        fn = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+            initialfile=f'portix_results_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json')
+        if not fn:
             return
-        
-        data = []
-        for iid in self.tree.get_children():
-            vals = self.tree.item(iid)['values']
-            data.append({
-                'target': vals[0],
-                'pid': vals[1],
-                'name': vals[2],
-                'port': vals[3],
-                'service': vals[4],
-                'status': vals[5],
-                'response_time': vals[6],
-                'last_check': vals[7],
-                'summary': vals[8]
-            })
-        
+        data = [{"target": v[0], "pid": v[1], "name": v[2], "port": v[3],
+                  "service": v[4], "status": v[5], "response_time": v[6],
+                  "last_check": v[7], "summary": v[8]}
+                for iid in self.tree.get_children()
+                for v in [self.tree.item(iid)["values"]]]
         try:
-            with open(filename, 'w') as f:
-                json.dump({
-                    'export_time': datetime.now().isoformat(),
-                    'total_services': len(data),
-                    'services': data
-                }, f, indent=2)
-            self.log(f"✅ Exported {len(data)} results to {filename}")
-            messagebox.showinfo('Export', f'Exported {len(data)} results successfully')
+            with open(fn, "w") as f:
+                json.dump({"export_time": datetime.now().isoformat(),
+                           "services": data}, f, indent=2)
+            self.log("ok", f"Exported {len(data)} results")
+            messagebox.showinfo("Export", f"Exported {len(data)} results to {fn}")
         except Exception as e:
-            messagebox.showerror('Export Error', str(e))
+            messagebox.showerror("Export Error", str(e))
 
     def export_history(self):
-        """Export history to JSON"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension='.json',
-            filetypes=[('JSON files', '*.json'), ('All files', '*.*')],
-            initialfile=f'monitor_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
-        )
-        
-        if not filename:
+        fn = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if not fn:
             return
-        
         try:
-            with open(filename, 'w') as f:
-                json.dump({
-                    'export_time': datetime.now().isoformat(),
-                    'history': dict(self.history)
-                }, f, indent=2)
-            
-            total_entries = sum(len(h) for h in self.history.values())
-            self.log(f"✅ Exported {total_entries} history entries")
-            messagebox.showinfo('Export', f'Exported {total_entries} entries successfully')
+            with open(fn, "w") as f:
+                json.dump({"export_time": datetime.now().isoformat(),
+                           "history": dict(self.history)}, f, indent=2)
+            total = sum(len(h) for h in self.history.values())
+            self.log("ok", f"Exported {total} history entries")
         except Exception as e:
-            messagebox.showerror('Export Error', str(e))
+            messagebox.showerror("Export Error", str(e))
 
-    def save_log(self):
-        """Save log to file"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension='.txt',
-            filetypes=[('Text files', '*.txt'), ('All files', '*.*')],
-            initialfile=f'monitor_log_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
-        )
-        
-        if not filename:
+    def _save_log(self):
+        fn = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text", "*.txt"), ("All files", "*.*")])
+        if not fn:
             return
-        
         try:
-            with open(filename, 'w') as f:
-                f.write(self.log_text.get('1.0', 'end'))
-            self.log(f"✅ Saved log to {filename}")
+            with open(fn, "w") as f:
+                f.write(self.log_text.get("1.0", "end"))
+            self.log("ok", f"Saved log to {fn}")
         except Exception as e:
-            messagebox.showerror('Save Error', str(e))
+            messagebox.showerror("Save Error", str(e))
 
-    # ============== Configuration ==============
-    def save_config(self):
-        """Save configuration to file"""
+    # ── config ─────────────────────────────────────────────────────────────────
+    def save_config(self, silent=False):
         try:
-            config = {
-                'servers': self.servers,
-                'custom_services': self.custom_services,
-                'poll_interval': self._poll_interval
-            }
-            
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(config, f, indent=2)
-            
-            self.log(f"✅ Configuration saved")
-            messagebox.showinfo('Save Config', 'Configuration saved successfully')
+            cfg = {"servers": self.servers,
+                   "custom_services": self.custom_services,
+                   "poll_interval": self._poll_interval,
+                   "theme": self.theme_name}
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(cfg, f, indent=2)
+            if not silent:
+                self.log("ok", "Config saved")
+                messagebox.showinfo("Save Config", "Saved.")
         except Exception as e:
-            messagebox.showerror('Save Error', str(e))
+            if not silent:
+                messagebox.showerror("Save Error", str(e))
 
     def load_config(self):
-        """Load configuration from file"""
-        filename = filedialog.askopenfilename(
-            defaultextension='.json',
-            filetypes=[('JSON files', '*.json'), ('All files', '*.*')],
-            initialfile=CONFIG_FILE.name
-        )
-        
-        if not filename:
+        fn = filedialog.askopenfilename(
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if not fn:
             return
-        
-        try:
-            with open(filename, 'r') as f:
-                config = json.load(f)
-            
-            self.servers = config.get('servers', [])
-            self.custom_services = config.get('custom_services', [])
-            self._poll_interval = config.get('poll_interval', DEFAULT_POLL_SECONDS)
-            
-            self.refresh_targets()
-            self.log(f"✅ Configuration loaded")
-            messagebox.showinfo('Load Config', 'Configuration loaded successfully')
-        except Exception as e:
-            messagebox.showerror('Load Error', str(e))
+        self._apply_config_file(fn)
+        messagebox.showinfo("Load Config", "Configuration loaded.")
 
-    def _load_config(self):
-        """Auto-load configuration on startup"""
+    def _load_config_auto(self):
         if CONFIG_FILE.exists():
             try:
-                with open(CONFIG_FILE, 'r') as f:
-                    config = json.load(f)
-                
-                self.servers = config.get('servers', [])
-                self.custom_services = config.get('custom_services', [])
-                self._poll_interval = config.get('poll_interval', DEFAULT_POLL_SECONDS)
-                
-                self.refresh_targets()
-                self.log(f"✅ Configuration loaded from {CONFIG_FILE.name}")
+                self._apply_config_file(str(CONFIG_FILE))
+                self.log("info", f"Config loaded from {CONFIG_FILE.name}")
             except Exception as e:
-                self.log(f"⚠️ Could not load config: {e}")
+                self.log("err", f"Config load failed: {e}")
 
-# ============== Dialogs ==============
-class RemoteDialog:
-    """Dialog for adding/editing remote SSH targets"""
-    def __init__(self, master, edit_data=None):
+    def _apply_config_file(self, path):
+        with open(path) as f:
+            cfg = json.load(f)
+        self.servers = cfg.get("servers", [])
+        self.custom_services = cfg.get("custom_services", [])
+        self._poll_interval = cfg.get("poll_interval", DEFAULT_POLL_SECONDS)
+        theme = cfg.get("theme", "light")
+        if theme in THEMES and theme != self.theme_name:
+            self.theme_name = theme
+            self.t = THEMES[self.theme_name]
+            self._build_styles()
+            self._apply_theme_to_widgets()
+            lbl = "☀  Light" if self.theme_name == "dark" else "🌙  Dark"
+            if hasattr(self, "theme_btn"):
+                self.theme_btn.configure(text=lbl)
+        self._refresh_targets()
+
+
+# ── Themed dialog base ────────────────────────────────────────────────────────
+class _ThemedDialog:
+    def _center(self, w=None, h=None):
+        self.top.update_idletasks()
+        w = w or self.top.winfo_width()
+        h = h or self.top.winfo_height()
+        x = (self.top.winfo_screenwidth()  - w) // 2
+        y = (self.top.winfo_screenheight() - h) // 2
+        self.top.geometry(f"{w}x{h}+{max(x,0)}+{max(y,0)}")
+
+
+# ── Remote Dialog ─────────────────────────────────────────────────────────────
+class RemoteDialog(_ThemedDialog):
+    def __init__(self, master, edit_data=None, theme=None):
+        self.theme = theme or THEMES["light"]
         self.top = tk.Toplevel(master)
-        self.top.title("Remote Target Configuration")
-        self.top.geometry('500x450')
+        self.top.title("Remote Target")
+        self.top.configure(bg=self.theme["bg"])
         self.result = None
         self.edit_data = edit_data
         self._build()
-        
-        # Center dialog
         self.top.transient(master)
         self.top.grab_set()
-        
-        # Center on screen
-        self.top.update_idletasks()
-        x = (self.top.winfo_screenwidth() // 2) - (self.top.winfo_width() // 2)
-        y = (self.top.winfo_screenheight() // 2) - (self.top.winfo_height() // 2)
-        self.top.geometry(f'500x450+{x}+{y}')
+        self._center(w=480, h=490)
 
     def _build(self):
-        # Title
-        title_frame = ttk.Frame(self.top, padding=20)
-        title_frame.pack(fill='x')
-        
-        title_text = "Edit Target" if self.edit_data else "Add Remote Target"
-        ttk.Label(title_frame, text=title_text, font=('Segoe UI', 14, 'bold')).pack(anchor='w')
-        
-        # Fields
-        fields_frame = ttk.Frame(self.top, padding=(20, 0, 20, 0))
-        fields_frame.pack(fill='both', expand=True)
-        
+        t = self.theme
+        wrap = ttk.Frame(self.top, padding=22)
+        wrap.pack(fill="both", expand=True)
+        wrap.grid_columnconfigure(0, weight=1)
+
+        title = "Edit target" if self.edit_data else "Add remote target"
+        ttk.Label(wrap, text=title, font=("Segoe UI", 14, "bold")).grid(
+            row=0, column=0, sticky="w")
+        ttk.Label(wrap, text="SSH connection details",
+                  style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(2, 16))
+
         self.vars = {}
-        
-        # Host
-        ttk.Label(fields_frame, text='Host *').pack(anchor='w', pady=(5, 2))
-        self.vars['host'] = tk.StringVar(value=self.edit_data.get('host', '') if self.edit_data else '')
-        ttk.Entry(fields_frame, textvariable=self.vars['host']).pack(fill='x', pady=(0, 10))
-        
-        # Port
-        ttk.Label(fields_frame, text='Port').pack(anchor='w', pady=(5, 2))
-        self.vars['port'] = tk.StringVar(value=str(self.edit_data.get('port', 22)) if self.edit_data else '22')
-        ttk.Entry(fields_frame, textvariable=self.vars['port']).pack(fill='x', pady=(0, 10))
-        
-        # Username
-        ttk.Label(fields_frame, text='Username *').pack(anchor='w', pady=(5, 2))
-        self.vars['username'] = tk.StringVar(value=self.edit_data.get('username', '') if self.edit_data else '')
-        ttk.Entry(fields_frame, textvariable=self.vars['username']).pack(fill='x', pady=(0, 10))
-        
-        # Password
-        ttk.Label(fields_frame, text='Password').pack(anchor='w', pady=(5, 2))
-        self.vars['password'] = tk.StringVar(value=self.edit_data.get('password', '') if self.edit_data else '')
-        ttk.Entry(fields_frame, textvariable=self.vars['password'], show='•').pack(fill='x', pady=(0, 10))
-        
-        # Private Key
-        ttk.Label(fields_frame, text='Private Key Path').pack(anchor='w', pady=(5, 2))
-        key_frame = ttk.Frame(fields_frame)
-        key_frame.pack(fill='x', pady=(0, 10))
-        
-        self.vars['pkey'] = tk.StringVar(value=self.edit_data.get('pkey', '') if self.edit_data else '')
-        ttk.Entry(key_frame, textvariable=self.vars['pkey']).pack(side='left', fill='x', expand=True)
-        ttk.Button(key_frame, text='Browse', command=self._browse_key).pack(side='right', padx=(5, 0))
-        
-        # Info
-        info_frame = ttk.LabelFrame(fields_frame, text='Info', padding=10)
-        info_frame.pack(fill='x', pady=(10, 0))
-        ttk.Label(info_frame, text='Use password OR private key\nPrivate key recommended for security', 
-                 font=('Segoe UI', 9)).pack(anchor='w')
-        
-        # Buttons at bottom
-        btn_frame = ttk.Frame(self.top, padding=20)
-        btn_frame.pack(fill='x', side='bottom')
-        
-        save_text = 'Update' if self.edit_data else 'Add Target'
-        ttk.Button(btn_frame, text=save_text, command=self.on_ok).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text='Cancel', command=self.top.destroy).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text='Test', command=self.test_connection).pack(side='left', padx=5)
+        ed = self.edit_data or {}
 
-    def _browse_key(self):
-        filename = filedialog.askopenfilename(title='Select Private Key')
-        if filename:
-            self.vars['pkey'].set(filename)
+        def field(label, key, default="", show=None, row=0):
+            ttk.Label(wrap, text=label).grid(row=row, column=0, sticky="w", pady=(6, 2))
+            v = tk.StringVar(value=default)
+            self.vars[key] = v
+            ttk.Entry(wrap, textvariable=v, show=show).grid(
+                row=row+1, column=0, sticky="we")
 
-    def test_connection(self):
-        """Test SSH connection"""
+        field("Host *",                "host",     ed.get("host", ""),     row=2)
+        field("Port",                  "port",     str(ed.get("port", 22)), row=4)
+        field("Username *",            "username", ed.get("username", ""), row=6)
+        field("Password",              "password", ed.get("password", ""), show="•", row=8)
+
+        ttk.Label(wrap, text="Private key path").grid(
+            row=10, column=0, sticky="w", pady=(6, 2))
+        pkey_row = ttk.Frame(wrap)
+        pkey_row.grid(row=11, column=0, sticky="we")
+        pkey_row.grid_columnconfigure(0, weight=1)
+        self.vars["pkey"] = tk.StringVar(value=ed.get("pkey", ""))
+        ttk.Entry(pkey_row, textvariable=self.vars["pkey"]).grid(
+            row=0, column=0, sticky="we", padx=(0, 6))
+        ttk.Button(pkey_row, text="Browse…", command=self._browse).grid(row=0, column=1)
+
+        btns = ttk.Frame(wrap)
+        btns.grid(row=12, column=0, sticky="we", pady=(18, 0))
+        ttk.Button(btns, text="Test", command=self.test).pack(side="left")
+        ttk.Button(btns, text="Cancel", command=self.top.destroy).pack(
+            side="right", padx=(6, 0))
+        ttk.Button(btns, text="Update" if self.edit_data else "Add",
+                   style="Primary.TButton",
+                   command=self.on_ok).pack(side="right")
+
+    def _browse(self):
+        fn = filedialog.askopenfilename(title="Select Private Key")
+        if fn:
+            self.vars["pkey"].set(fn)
+
+    def _get_data(self):
+        data = {k: v.get().strip() for k, v in self.vars.items() if v.get().strip()}
+        if not data.get("host"):
+            messagebox.showerror("Error", "Host is required.", parent=self.top)
+            return None
+        if not data.get("username"):
+            messagebox.showerror("Error", "Username is required.", parent=self.top)
+            return None
+        try:
+            data["port"] = int(data.get("port", 22))
+        except Exception:
+            messagebox.showerror("Error", "Port must be a number.", parent=self.top)
+            return None
+        return data
+
+    def test(self):
         data = self._get_data()
         if not data:
             return
-        
         try:
-            self.top.config(cursor='watch')
+            self.top.config(cursor="watch")
             self.top.update()
-            
-            out, err = ssh_run(data['host'], data['username'],
-                             password=data.get('password'),
-                             pkey_path=data.get('pkey'),
-                             port=data.get('port', 22),
-                             timeout=5,
-                             cmd='echo "OK"')
-            
-            if 'OK' in out:
-                messagebox.showinfo('Test', 'Connection successful!', parent=self.top)
+            out, err = ssh_run(data["host"], data["username"],
+                               password=data.get("password"),
+                               pkey_path=data.get("pkey"),
+                               port=data.get("port", 22),
+                               timeout=5, cmd='echo "PORTIX_OK"')
+            if "PORTIX_OK" in out:
+                messagebox.showinfo("Test", "Connection successful!", parent=self.top)
             else:
-                messagebox.showerror('Test', f'Failed:\n{err}', parent=self.top)
+                messagebox.showerror("Test", f"Failed:\n{err}", parent=self.top)
         except Exception as e:
-            messagebox.showerror('Test', f'Error:\n{str(e)}', parent=self.top)
+            messagebox.showerror("Test", str(e), parent=self.top)
         finally:
-            self.top.config(cursor='')
-
-    def _get_data(self):
-        """Get and validate data"""
-        data = {}
-        for k, v in self.vars.items():
-            val = v.get().strip()
-            if val:
-                data[k] = val
-        
-        if not data.get('host'):
-            messagebox.showerror('Error', 'Host is required', parent=self.top)
-            return None
-        
-        if not data.get('username'):
-            messagebox.showerror('Error', 'Username is required', parent=self.top)
-            return None
-        
-        # Set default port
-        if 'port' not in data:
-            data['port'] = 22
-        else:
-            try:
-                data['port'] = int(data['port'])
-            except:
-                messagebox.showerror('Error', 'Port must be a number', parent=self.top)
-                return None
-        
-        return data
+            self.top.config(cursor="")
 
     def on_ok(self):
         data = self._get_data()
@@ -2107,882 +1792,459 @@ class RemoteDialog:
             self.result = data
             self.top.destroy()
 
-class CustomServiceDialog:
-    """Dialog for adding custom service endpoints"""
-    def __init__(self, master):
+
+# ── Custom Service Dialog ─────────────────────────────────────────────────────
+class CustomServiceDialog(_ThemedDialog):
+    def __init__(self, master, theme=None):
+        self.theme = theme or THEMES["light"]
         self.top = tk.Toplevel(master)
-        self.top.title("Add Custom Service")
-        self.top.geometry('450x280')
+        self.top.title("Custom Service")
+        self.top.configure(bg=self.theme["bg"])
         self.top.resizable(False, False)
         self.result = None
         self._build()
-        
         self.top.transient(master)
         self.top.grab_set()
-        
-        # Center on screen
-        self.top.update_idletasks()
-        x = (self.top.winfo_screenwidth() // 2) - (self.top.winfo_width() // 2)
-        y = (self.top.winfo_screenheight() // 2) - (self.top.winfo_height() // 2)
-        self.top.geometry(f'+{x}+{y}')
+        self._center(w=440, h=320)
 
     def _build(self):
-        frm = ttk.Frame(self.top, padding=20)
-        frm.pack(fill='both', expand=True)
-        frm.grid_columnconfigure(1, weight=1)
-        
-        ttk.Label(frm, text='Custom Service Endpoint', 
-                 font=('Segoe UI', 14, 'bold')).grid(
-            row=0, column=0, columnspan=2, pady=(0, 15), sticky='w')
-        
-        ttk.Label(frm, text='Service Name:').grid(row=1, column=0, sticky='w', pady=8)
-        self.name_var = tk.StringVar()
-        ttk.Entry(frm, textvariable=self.name_var, width=35).grid(
-            row=1, column=1, sticky='we', pady=8)
-        
-        ttk.Label(frm, text='Path:').grid(row=2, column=0, sticky='w', pady=8)
-        self.path_var = tk.StringVar(value='/')
-        ttk.Entry(frm, textvariable=self.path_var, width=35).grid(
-            row=2, column=1, sticky='we', pady=8)
-        
-        ttk.Label(frm, text='Expected Text:').grid(row=3, column=0, sticky='w', pady=8)
-        self.expect_var = tk.StringVar()
-        ttk.Entry(frm, textvariable=self.expect_var, width=35).grid(
-            row=3, column=1, sticky='we', pady=8)
-        
+        wrap = ttk.Frame(self.top, padding=22)
+        wrap.pack(fill="both", expand=True)
+        wrap.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(wrap, text="Add custom service",
+                  font=("Segoe UI", 14, "bold")).grid(row=0, sticky="w")
+        ttk.Label(wrap, text="Custom HTTP endpoint to probe",
+                  style="Muted.TLabel").grid(row=1, sticky="w", pady=(2, 14))
+
+        for row, (lbl, attr, default) in enumerate([
+            ("Name",                   "name_var",   ""),
+            ("Path",                   "path_var",   "/"),
+            ("Expected text (optional)", "expect_var", ""),
+        ]):
+            ttk.Label(wrap, text=lbl).grid(row=2+row*2, sticky="w", pady=(6, 2))
+            v = tk.StringVar(value=default)
+            setattr(self, attr, v)
+            ttk.Entry(wrap, textvariable=v).grid(row=3+row*2, sticky="we")
+
         self.critical_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frm, text='Critical (trigger alerts on failure)', 
-                       variable=self.critical_var).grid(
-                           row=4, column=0, columnspan=2, sticky='w', pady=10)
-        
-        # Example
-        example_frame = ttk.Frame(frm, relief='solid', borderwidth=1, padding=8)
-        example_frame.grid(row=5, column=0, columnspan=2, sticky='we', pady=(5, 0))
-        
-        ttk.Label(example_frame, text='Example:', 
-                 font=('Segoe UI', 9, 'bold')).pack(anchor='w')
-        ttk.Label(example_frame, 
-                 text='Name: My API Health\n'
-                      'Path: /api/health\n'
-                      'Expected: "healthy"',
-                 font=('Segoe UI', 9),
-                 foreground='gray').pack(anchor='w', pady=(3, 0))
-        
-        # Buttons
-        btnf = ttk.Frame(frm)
-        btnf.grid(row=6, column=0, columnspan=2, pady=(15, 0))
-        
-        ttk.Button(btnf, text='Add Service', command=self.on_ok, 
-                  width=15, style='Primary.TButton').pack(side='left', padx=5)
-        ttk.Button(btnf, text='Cancel', command=self.top.destroy, 
-                  width=15).pack(side='left', padx=5)
+        ttk.Checkbutton(wrap, text="Critical — alert on failure",
+                        variable=self.critical_var).grid(row=9, sticky="w", pady=(10, 0))
+
+        btns = ttk.Frame(wrap)
+        btns.grid(row=10, sticky="we", pady=(18, 0))
+        ttk.Button(btns, text="Cancel", command=self.top.destroy).pack(
+            side="right", padx=(6, 0))
+        ttk.Button(btns, text="Add", style="Primary.TButton",
+                   command=self.on_ok).pack(side="right")
 
     def on_ok(self):
         name = self.name_var.get().strip()
         path = self.path_var.get().strip()
-        
         if not name:
-            messagebox.showerror('Validation', 'Service name is required')
+            messagebox.showerror("Error", "Name required.", parent=self.top)
             return
-        
         if not path:
-            messagebox.showerror('Validation', 'Path is required')
+            messagebox.showerror("Error", "Path required.", parent=self.top)
             return
-        
-        if not path.startswith('/'):
-            path = '/' + path
-        
-        self.result = {
-            'name': name,
-            'path': path,
-            'expect': self.expect_var.get().strip(),
-            'critical': self.critical_var.get()
-        }
+        if not path.startswith("/"):
+            path = "/" + path
+        self.result = {"name": name, "path": path,
+                       "expect": self.expect_var.get().strip(),
+                       "critical": self.critical_var.get()}
         self.top.destroy()
 
-# Add this enhanced UnixHistoryDialog class to replace the existing one in the script
 
-class UnixHistoryDialog:
-    """Enhanced dialog for viewing Unix command history and running commands on remote server"""
-    def __init__(self, master, host, history_output, server_config=None):
+# ── Details Dialog ────────────────────────────────────────────────────────────
+class DetailsDialog(_ThemedDialog):
+    def __init__(self, master, vals, theme=None):
+        self.theme = theme or THEMES["light"]
         self.top = tk.Toplevel(master)
-        self.top.title(f"Server Terminal - {host}")
-        self.top.geometry('1200x900')        
+        self.top.title("Service Details")
+        self.top.configure(bg=self.theme["surface"])
+        self._build(vals)
+        self.top.transient(master)
+        self.top.grab_set()
+        self._center(w=520, h=440)
+
+    def _build(self, vals):
+        wrap = ttk.Frame(self.top, padding=22)
+        wrap.pack(fill="both", expand=True)
+
+        ttk.Label(wrap, text="Service details",
+                  font=("Segoe UI", 14, "bold")).pack(anchor="w")
+        ttk.Label(wrap, text=f"{vals[2]} on {vals[0]}:{vals[3]}",
+                  style="Muted.TLabel").pack(anchor="w", pady=(2, 16))
+
+        card = ttk.LabelFrame(wrap, text="Info", padding=12)
+        card.pack(fill="both", expand=True)
+        card.grid_columnconfigure(1, weight=1)
+
+        pairs = [("Target", vals[0]), ("PID", vals[1]), ("Application", vals[2]),
+                 ("Port", vals[3]), ("Service", vals[4] or "—"),
+                 ("Status", vals[5] or "—"), ("Response Time", vals[6] or "—"),
+                 ("Last Check", vals[7] or "—"), ("Details", vals[8] or "—")]
+        for r, (k, v) in enumerate(pairs):
+            ttk.Label(card, text=k, style="SurfaceMuted.TLabel").grid(
+                row=r, column=0, sticky="w", padx=(0, 12), pady=3)
+            ttk.Label(card, text=str(v), style="Surface.TLabel",
+                      wraplength=340, justify="left").grid(
+                row=r, column=1, sticky="w", pady=3)
+
+        ttk.Button(wrap, text="Close", command=self.top.destroy,
+                   style="Primary.TButton").pack(pady=(16, 0), anchor="e")
+
+
+# ── Unix History Dialog ───────────────────────────────────────────────────────
+class UnixHistoryDialog(_ThemedDialog):
+    def __init__(self, master, host, history_output, server_config=None, theme=None):
+        self.theme = theme or THEMES["light"]
+        self.top = tk.Toplevel(master)
+        self.top.title(f"Remote Shell — {host}")
+        self.top.geometry("1100x760")
+        self.top.configure(bg=self.theme["bg"])
         self.host = host
         self.server_config = server_config
-        self.command_queue = queue.Queue()
-        
-        frm = ttk.Frame(self.top, padding=15)
-        frm.pack(fill='both', expand=True)
-        frm.grid_rowconfigure(1, weight=1)
-        frm.grid_columnconfigure(0, weight=1)
-        
-        # Header
-        header = ttk.Frame(frm)
-        header.grid(row=0, column=0, sticky='we', pady=(0, 10))
-        header.grid_columnconfigure(1, weight=1)
-        
-        ttk.Label(header, text=f'🖥️  Server Terminal: {host}', 
-                 font=('Segoe UI', 14, 'bold')).grid(row=0, column=0, sticky='w')
-        
-        # Status indicator
-        self.status_label = ttk.Label(header, text='● Connected', 
-                                     font=('Segoe UI', 10, 'bold'),
-                                     foreground='#28a745')
-        self.status_label.grid(row=0, column=1, sticky='e')
-        
-        # Export button
-        ttk.Button(header, text='💾 Export', 
-                  command=lambda: self.export_history(host, history_output)).grid(
-                      row=0, column=2, padx=5)
-        
-        # Command history list
-        history_frame = ttk.LabelFrame(frm, text='📜 Command History (Recent 200 Commands)', 
-                                      padding=10)
-        history_frame.grid(row=1, column=0, sticky='nswe', pady=(0, 10))
-        history_frame.grid_rowconfigure(1, weight=1)
-        history_frame.grid_columnconfigure(0, weight=1)
-        
-        # Search bar - MOVED TO TOP OF HISTORY FRAME
-        search_frame = ttk.Frame(history_frame)
-        search_frame.grid(row=0, column=0, sticky='we', pady=(0, 10))
-        search_frame.grid_columnconfigure(1, weight=1)
-        
-        ttk.Label(search_frame, text='🔎 Search:').grid(row=0, column=0, padx=(0, 5))
-        self.search_var = tk.StringVar()
-        self.search_var.trace('w', lambda *args: self.filter_history())
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
-        search_entry.grid(row=0, column=1, sticky='we', padx=2)
-        
-        ttk.Button(search_frame, text='✖ Clear', 
-                  command=lambda: self.search_var.set('')).grid(row=0, column=2, padx=2)
-        
-        # Info label
-        self.info_label = ttk.Label(search_frame, text='Tip: Double-click to run command', 
-                                    foreground='#6c757d', font=('Segoe UI', 9))
-        self.info_label.grid(row=0, column=3, padx=15)
-        
-        # Listbox for command history
-        list_container = ttk.Frame(history_frame, relief='sunken', borderwidth=1)
-        list_container.grid(row=1, column=0, sticky='nswe')
-        list_container.grid_rowconfigure(0, weight=1)
-        list_container.grid_columnconfigure(0, weight=1)
-        
-        self.history_listbox = tk.Listbox(list_container, 
-                                         font=('Consolas', 10),
-                                         selectmode='extended',
-                                         activestyle='none',
-                                         bg='#f8f9fa',
-                                         relief='flat',
-                                         height=20)  # Reduced height since we have more space
-        self.history_listbox.grid(row=0, column=0, sticky='nswe')
-        
-        # Scrollbars
-        vsb = ttk.Scrollbar(list_container, orient='vertical', 
-                           command=self.history_listbox.yview)
-        vsb.grid(row=0, column=1, sticky='ns')
-        self.history_listbox.configure(yscrollcommand=vsb.set)
-        
-        # Parse and populate history
-        self.parse_and_populate(history_output)
-        
-        # Double-click to run command
-        self.history_listbox.bind('<Double-Button-1>', self.run_selected_command)
-        
-        # Context menu for listbox
-        self.list_menu = tk.Menu(self.history_listbox, tearoff=0)
-        self.list_menu.add_command(label="▶ Run Command", command=self.run_selected_command)
-        self.list_menu.add_command(label="📋 Copy Command", command=self.copy_selected_command)
-        self.list_menu.add_separator()
-        self.list_menu.add_command(label="🔍 Filter Similar", command=self.filter_similar)
-        
-        self.history_listbox.bind('<Button-3>', self.show_list_menu)
-        
-        # Command execution section - SIMPLIFIED WITHOUT QUICK COMMANDS
-        exec_frame = ttk.LabelFrame(frm, text='⚡ Execute Commands on Server', padding=10)
-        exec_frame.grid(row=2, column=0, sticky='nswe')
-        exec_frame.grid_rowconfigure(1, weight=1)
-        exec_frame.grid_columnconfigure(0, weight=1)
-        
-        # Command input
-        cmd_input_frame = ttk.Frame(exec_frame)
-        cmd_input_frame.grid(row=0, column=0, sticky='we', pady=(0, 10))
-        cmd_input_frame.grid_columnconfigure(1, weight=1)
-        
-        ttk.Label(cmd_input_frame, text='Command:', 
-                 font=('Segoe UI', 10, 'bold')).grid(row=0, column=0, padx=(0, 5))
-        
-        self.command_var = tk.StringVar()
-        self.command_entry = ttk.Entry(cmd_input_frame, 
-                                      textvariable=self.command_var,
-                                      font=('Consolas', 11))
-        self.command_entry.grid(row=0, column=1, sticky='we', padx=5)
-        self.command_entry.bind('<Return>', lambda e: self.execute_command())
-        self.command_entry.focus()
-        
-        ttk.Button(cmd_input_frame, text='▶ Execute', 
-                  command=self.execute_command,
-                  style='Primary.TButton').grid(row=0, column=2, padx=5)
-        
-        ttk.Button(cmd_input_frame, text='📋 Paste', 
-                  command=self.paste_from_clipboard).grid(row=0, column=3, padx=2)
-        
-        # Output area
-        output_container = ttk.Frame(exec_frame)
-        output_container.grid(row=1, column=0, sticky='nswe', pady=(10, 0))
-        output_container.grid_rowconfigure(0, weight=1)
-        output_container.grid_columnconfigure(0, weight=1)
-        
-        self.output_text = tk.Text(output_container, 
-                                   font=('Consolas', 10),
-                                   bg='#0d1b2a',
-                                   fg='#00ff41',
-                                   wrap='none',
-                                   relief='sunken',
-                                   borderwidth=2,
-                                   height=12)  # Increased height since we removed quick commands
-        self.output_text.grid(row=0, column=0, sticky='nswe')
-        
-        # Scrollbars for output
-        out_vsb = ttk.Scrollbar(output_container, orient='vertical', 
-                               command=self.output_text.yview)
-        out_vsb.grid(row=0, column=1, sticky='ns')
-        out_hsb = ttk.Scrollbar(output_container, orient='horizontal',
-                               command=self.output_text.xview)
-        out_hsb.grid(row=1, column=0, sticky='we')
-        self.output_text.configure(yscrollcommand=out_vsb.set, 
-                                  xscrollcommand=out_hsb.set)
-        
-        # Initial message
-        self.log_output(f"╔{'═'*58}╗\n", '#00d4ff')
-        self.log_output(f"║  Connected to {host:48} ║\n", '#00d4ff')
-        self.log_output(f"║  Type commands to execute on remote server{' '*15}║\n", '#00d4ff')
-        self.log_output(f"╚{'═'*58}╝\n\n", '#00d4ff')
-        
-        # Output controls
-        output_ctrl = ttk.Frame(exec_frame)
-        output_ctrl.grid(row=2, column=0, sticky='we', pady=(5, 0))
-        
-        ttk.Button(output_ctrl, text='🗑️ Clear Output', 
-                  command=lambda: self.output_text.delete('1.0', 'end')).pack(side='left', padx=2)
-        ttk.Button(output_ctrl, text='💾 Save Output', 
-                  command=self.save_output).pack(side='left', padx=2)
-        ttk.Button(output_ctrl, text='📋 Copy Output', 
-                  command=self.copy_output).pack(side='left', padx=2)
-        
-        # Stats
-        stats_frame = ttk.Frame(frm)
-        stats_frame.grid(row=3, column=0, sticky='we', pady=(10, 0))
-        
-        lines = history_output.strip().split('\n') if history_output else []
-        self.stats_label = ttk.Label(stats_frame, 
-                                     text=f"Total Commands in History: {len(lines)}  |  Server: {host}",
-                                     font=('Segoe UI', 10))
-        self.stats_label.pack(side='left')
-        
-        # Close button
-        ttk.Button(stats_frame, text='Close', 
-                  command=self.top.destroy, width=15).pack(side='right')
-        
+        self.cmd_queue: queue.Queue = queue.Queue()
+        self.all_cmds: list[tuple[str, str]] = []
+        self._build(history_output)
         self.top.transient(master)
-        self.history_output = history_output
-        self.all_commands = []
-        
-        # Start queue processor
-        self.start_queue_processor()
-    
-    def parse_and_populate(self, history_output):
-        """Parse history and populate listbox"""
-        if not history_output:
-            self.info_label.config(text='❌ No history data received from server!')
+        self._parse_history(history_output)
+        self._start_cmd_processor()
+
+    def _build(self, history_output):
+        t = self.theme
+        frm = ttk.Frame(self.top, padding=16)
+        frm.pack(fill="both", expand=True)
+        frm.grid_rowconfigure(1, weight=2)
+        frm.grid_rowconfigure(2, weight=3)
+        frm.grid_columnconfigure(0, weight=1)
+
+        hdr = ttk.Frame(frm)
+        hdr.grid(row=0, sticky="we", pady=(0, 10))
+        hdr.grid_columnconfigure(1, weight=1)
+        ttk.Label(hdr, text=f"Remote Shell — {self.host}",
+                  font=("Segoe UI", 13, "bold")).grid(row=0, column=0, sticky="w")
+        self.conn_label = ttk.Label(hdr, text="● Connected",
+                                    foreground=t["success"],
+                                    background=t["bg"])
+        self.conn_label.grid(row=0, column=1, sticky="e")
+
+        # history
+        hist = ttk.LabelFrame(frm, text="Command history", padding=10)
+        hist.grid(row=1, sticky="nswe", pady=(0, 8))
+        hist.grid_rowconfigure(1, weight=1)
+        hist.grid_columnconfigure(0, weight=1)
+
+        sr = ttk.Frame(hist)
+        sr.grid(row=0, sticky="we", pady=(0, 6))
+        sr.grid_columnconfigure(1, weight=1)
+        ttk.Label(sr, text="Filter").grid(row=0, column=0, padx=(0, 6))
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *a: self._refresh_list())
+        ttk.Entry(sr, textvariable=self.search_var).grid(row=0, column=1, sticky="we")
+        ttk.Button(sr, text="Clear",
+                   command=lambda: self.search_var.set("")).grid(row=0, column=2, padx=(6, 0))
+
+        lw = tk.Frame(hist, bg=t["border"])
+        lw.grid(row=1, sticky="nswe")
+        lw.grid_rowconfigure(0, weight=1)
+        lw.grid_columnconfigure(0, weight=1)
+        self.hist_lb = tk.Listbox(lw, font=("Consolas", 10), selectmode="extended",
+                                   activestyle="none", bg=t["surface2"], fg=t["text"],
+                                   selectbackground=t["accent_bg"], selectforeground=t["text"],
+                                   relief="flat", bd=0, highlightthickness=0)
+        self.hist_lb.grid(row=0, column=0, sticky="nswe", padx=1, pady=1)
+        vsb = ttk.Scrollbar(lw, orient="vertical", command=self.hist_lb.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        self.hist_lb.configure(yscrollcommand=vsb.set)
+        self.hist_lb.bind("<Double-Button-1>", self._run_from_list)
+        self.info_lbl = ttk.Label(hist, text="Double-click to run",
+                                  style="Muted.TLabel", font=("Segoe UI", 9))
+        self.info_lbl.grid(row=2, sticky="w", pady=(4, 0))
+
+        # exec
+        exec_frm = ttk.LabelFrame(frm, text="Execute on server", padding=10)
+        exec_frm.grid(row=2, sticky="nswe")
+        exec_frm.grid_rowconfigure(1, weight=1)
+        exec_frm.grid_columnconfigure(0, weight=1)
+
+        cmd_row = ttk.Frame(exec_frm)
+        cmd_row.grid(row=0, sticky="we", pady=(0, 8))
+        cmd_row.grid_columnconfigure(1, weight=1)
+        ttk.Label(cmd_row, text="$", font=("Consolas", 13, "bold")).grid(
+            row=0, column=0, padx=(0, 8))
+        self.cmd_var = tk.StringVar()
+        self.cmd_entry = ttk.Entry(cmd_row, textvariable=self.cmd_var,
+                                    font=("Consolas", 11))
+        self.cmd_entry.grid(row=0, column=1, sticky="we")
+        self.cmd_entry.bind("<Return>", lambda e: self._execute())
+        self.cmd_entry.focus()
+        ttk.Button(cmd_row, text="Run", style="Primary.TButton",
+                   command=self._execute).grid(row=0, column=2, padx=(8, 0))
+
+        out_wrap = tk.Frame(exec_frm, bg=t["border"], bd=0, highlightthickness=0)
+        out_wrap.grid(row=1, sticky="nswe")
+        out_wrap.grid_rowconfigure(0, weight=1)
+        out_wrap.grid_columnconfigure(0, weight=1)
+        self.out_text = tk.Text(out_wrap, font=("Consolas", 10),
+                                bg=t["term_bg"], fg=t["term_fg"],
+                                insertbackground=t["term_fg"],
+                                wrap="none", relief="flat", bd=0,
+                                highlightthickness=0, padx=10, pady=10)
+        self.out_text.grid(row=0, column=0, sticky="nswe", padx=1, pady=1)
+        ovsb = ttk.Scrollbar(out_wrap, orient="vertical", command=self.out_text.yview)
+        ovsb.grid(row=0, column=1, sticky="ns")
+        ohsb = ttk.Scrollbar(out_wrap, orient="horizontal", command=self.out_text.xview)
+        ohsb.grid(row=1, column=0, sticky="we")
+        self.out_text.configure(yscrollcommand=ovsb.set, xscrollcommand=ohsb.set)
+
+        self._log_out(f"Connected to {self.host}\n", t["term_accent"])
+        self._log_out("Type a command and press Run.\n\n", t["term_fg"])
+
+        footer = ttk.Frame(frm)
+        footer.grid(row=3, sticky="we", pady=(8, 0))
+        ttk.Button(footer, text="Close", command=self.top.destroy).pack(side="right")
+
+    def _parse_history(self, text):
+        if not text:
             return
-        
-        lines = history_output.strip().split('\n')
-        
-        self.all_commands = []
-        
-        for idx, line in enumerate(lines, 1):
+        for i, line in enumerate(text.strip().split("\n"), 1):
             line = line.strip()
             if not line:
                 continue
-                
-            # Try to parse numbered format: "  123  command"
-            match = re.match(r'^\s*(\d+)\s+(.*)$', line)
-            if match:
-                line_num = match.group(1)
-                command = match.group(2)
-                self.all_commands.append((line_num, command))
-            else:
-                # Plain command without number - ADD OUR OWN NUMBER
-                self.all_commands.append((str(idx), line))
-        
-        # Populate listbox
-        self.update_listbox_display()
-        
-        # Update info with count
-        if self.all_commands:
-            self.info_label.config(text=f'✅ Loaded {len(self.all_commands)} commands from history')
-        else:
-            self.info_label.config(text='⚠️ History data received but no valid commands found')
-    
-    def update_listbox_display(self):
-        """Update listbox with filtered commands"""
-        self.history_listbox.delete(0, tk.END)
-        
-        # SAFETY CHECK - search_var might not exist yet
-        try:
-            search_text = self.search_var.get().lower()
-        except AttributeError:
-            search_text = ''
-        
+            m = re.match(r"^\s*(\d+)\s+(.*)$", line)
+            self.all_cmds.append(m.groups() if m else (str(i), line))
+        self._refresh_list()
+
+    def _refresh_list(self):
+        t = self.theme
+        self.hist_lb.delete(0, tk.END)
+        q = self.search_var.get().lower()
         count = 0
-        
-        for line_num, command in self.all_commands:
-            if not search_text or search_text in command.lower():
-                display = f"{line_num:>6}  {command}" if line_num else f"        {command}"
-                self.history_listbox.insert(tk.END, display)
-                count += 1
-                
-                # Color code important commands
-                if any(keyword in command.lower() for keyword in ['sudo', 'rm -', 'kill ']):
-                    self.history_listbox.itemconfig(tk.END, fg='#dc3545')
-                elif any(keyword in command.lower() for keyword in ['java', 'mvn', 'gradle', 'jar']):
-                    self.history_listbox.itemconfig(tk.END, fg='#28a745')
-                elif any(keyword in command.lower() for keyword in ['docker', 'kubectl', 'systemctl', 'service']):
-                    self.history_listbox.itemconfig(tk.END, fg='#0078d4')
-        
-        # Update info label
-        if search_text:
-            self.info_label.config(text=f'Found {count} matching commands')
-        else:
-            self.info_label.config(text='Tip: Double-click to run command')
-    
-    def filter_history(self):
-        """Filter history based on search"""
-        self.update_listbox_display()
-    
-    def show_list_menu(self, event):
-        """Show context menu for listbox"""
-        # Select the item under cursor
-        index = self.history_listbox.nearest(event.y)
-        self.history_listbox.selection_clear(0, tk.END)
-        self.history_listbox.selection_set(index)
-        self.history_listbox.activate(index)
-        
-        self.list_menu.post(event.x_root, event.y_root)
-    
-    def copy_selected_command(self):
-        """Copy selected command to clipboard"""
-        selection = self.history_listbox.curselection()
-        if not selection:
+        for num, cmd in self.all_cmds:
+            if q and q not in cmd.lower():
+                continue
+            self.hist_lb.insert(tk.END, f"{num:>5}   {cmd}")
+            low = cmd.lower()
+            if any(k in low for k in ["rm -", "sudo rm", "kill", "shutdown"]):
+                self.hist_lb.itemconfig(tk.END, fg=t["danger"])
+            elif any(k in low for k in ["java", "mvn", "gradle"]):
+                self.hist_lb.itemconfig(tk.END, fg=t["success"])
+            count += 1
+        self.info_lbl.config(text=f"{count} of {len(self.all_cmds)} commands")
+
+    def _run_from_list(self, _e=None):
+        sel = self.hist_lb.curselection()
+        if not sel:
             return
-        
-        item = self.history_listbox.get(selection[0])
-        match = re.match(r'^\s*\d*\s*(.*)$', item)
-        if match:
-            command = match.group(1).strip()
-            self.top.clipboard_clear()
-            self.top.clipboard_append(command)
-            self.info_label.config(text='Command copied to clipboard')
-    
-    def filter_similar(self):
-        """Filter commands similar to selected"""
-        selection = self.history_listbox.curselection()
-        if not selection:
+        item = self.hist_lb.get(sel[0])
+        m = re.match(r"^\s*\d*\s*(.*)$", item)
+        if m:
+            self.cmd_var.set(m.group(1).strip())
+            self._execute()
+
+    def _execute(self):
+        cmd = self.cmd_var.get().strip()
+        if not cmd or not self.server_config:
             return
-        
-        item = self.history_listbox.get(selection[0])
-        match = re.match(r'^\s*\d*\s*(.*)$', item)
-        if match:
-            command = match.group(1).strip()
-            # Get first word as filter
-            first_word = command.split()[0] if command.split() else ''
-            if first_word:
-                self.search_var.set(first_word)
-    
-    def run_selected_command(self, event=None):
-        """Run selected command from history"""
-        selection = self.history_listbox.curselection()
-        if not selection:
-            return
-        
-        # Get selected command
-        item = self.history_listbox.get(selection[0])
-        # Extract command (remove line number if present)
-        match = re.match(r'^\s*\d*\s*(.*)$', item)
-        if match:
-            command = match.group(1).strip()
-            self.command_var.set(command)
-            self.execute_command()
-    
-    def execute_command(self):
-        """Execute command on remote server"""
-        command = self.command_var.get().strip()
-        
-        if not command:
-            messagebox.showwarning('Execute', 'Please enter a command', parent=self.top)
-            return
-        
-        if not self.server_config:
-            messagebox.showerror('Execute', 'No server configuration available', parent=self.top)
-            return
-        
-        # Confirm dangerous commands
-        dangerous_keywords = ['rm -rf', 'dd if=', 'mkfs', ':(){:|:&};:', 'shutdown', 'reboot', 'init 0', 'halt']
-        if any(keyword in command for keyword in dangerous_keywords):
-            if not messagebox.askyesno('⚠️  Dangerous Command', 
-                                      f'This command may be DANGEROUS:\n\n{command}\n\n'
-                                      f'It could cause data loss or system shutdown.\n\n'
-                                      f'Are you SURE you want to continue?',
-                                      parent=self.top):
-                return
-        
-        self.log_output(f"\n╭─ $ ", '#00d4ff')
-        self.log_output(f"{command}\n", '#ffffff')
-        self.log_output(f"╰─{'─'*60}\n", '#00d4ff')
-        
-        self.status_label.config(text='⏳ Executing...', foreground='#ffc107')
-        self.command_entry.config(state='disabled')
-        
-        # Execute in background thread
-        threading.Thread(target=self._execute_worker, args=(command,), daemon=True).start()
-    
-    def _execute_worker(self, command):
-        """Worker thread to execute command"""
-        try:
-            out, err = ssh_run(
-                self.server_config['host'],
-                self.server_config['username'],
-                password=self.server_config.get('password'),
-                pkey_path=self.server_config.get('pkey'),
-                port=self.server_config.get('port', 22),
-                cmd=command,
-                timeout=30
-            )
-            
-            self.command_queue.put(('success', {'output': out, 'error': err}))
-            
-        except Exception as e:
-            self.command_queue.put(('error', str(e)))
-    
-    def start_queue_processor(self):
-        """Process command execution results"""
+        t = self.theme
+        self._log_out(f"\n$ {cmd}\n", t["term_accent"])
+        self.conn_label.config(text="● Running…", foreground=t["warning"])
+        self.cmd_entry.config(state="disabled")
+        threading.Thread(target=self._exec_worker, args=(cmd,), daemon=True).start()
+
+    def _exec_worker(self, cmd):
+        out, err = ssh_run(self.server_config["host"],
+                           self.server_config["username"],
+                           password=self.server_config.get("password"),
+                           pkey_path=self.server_config.get("pkey"),
+                           port=self.server_config.get("port", 22),
+                           cmd=cmd, timeout=30)
+        self.cmd_queue.put(("result", {"out": out, "err": err}))
+
+    def _start_cmd_processor(self):
         def process():
+            t = self.theme
             try:
                 while True:
                     try:
-                        event_type, data = self.command_queue.get_nowait()
-                        
-                        if event_type == 'success':
-                            output = data['output']
-                            error = data['error']
-                            
-                            if output:
-                                self.log_output(output, '#00ff41')
-                            
-                            if error:
-                                self.log_output(f"\n⚠️  Error:\n", '#ffc107')
-                                self.log_output(f"{error}\n", '#ef4444')
-                            
-                            if not output and not error:
-                                self.log_output("(no output)\n", '#8892b0')
-                            
-                            self.log_output(f"\n{'─'*60}\n", '#00d4ff')
-                            
-                            self.status_label.config(text='✓ Connected', 
-                                                   foreground='#28a745')
-                            
-                        elif event_type == 'error':
-                            self.log_output(f"\n❌ Execution Error:\n", '#ef4444')
-                            self.log_output(f"{data}\n", '#ef4444')
-                            self.log_output(f"\n{'─'*60}\n", '#00d4ff')
-                            
-                            self.status_label.config(text='✗ Error', 
-                                                   foreground='#dc3545')
-                        
+                        ev, data = self.cmd_queue.get_nowait()
+                        if ev == "result":
+                            if data["out"]:
+                                self._log_out(data["out"], t["term_fg"])
+                            if data["err"]:
+                                self._log_out(f"\n{data['err']}\n", t["danger"])
+                            if not data["out"] and not data["err"]:
+                                self._log_out("(no output)\n", t["text3"])
+                            self.conn_label.config(text="● Connected",
+                                                   foreground=t["success"])
                     except queue.Empty:
                         break
             finally:
-                self.command_entry.config(state='normal')
+                self.cmd_entry.config(state="normal")
                 self.top.after(100, process)
-        
         process()
-    
-    def log_output(self, text, color='#00ff41'):
-        """Log output to text widget with color"""
-        self.output_text.config(state='normal')
-        
-        tag_name = f'color_{color.replace("#", "")}'
-        self.output_text.tag_configure(tag_name, foreground=color)
-        
-        self.output_text.insert('end', text, tag_name)
-        self.output_text.see('end')
-        
-        self.output_text.config(state='disabled')
-    
-    def paste_from_clipboard(self):
-        """Paste from clipboard to command entry"""
-        try:
-            clipboard_text = self.top.clipboard_get()
-            self.command_var.set(clipboard_text)
-        except:
-            pass
-    
-    def save_output(self):
-        """Save output to file"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension='.txt',
-            filetypes=[('Text files', '*.txt'), ('All files', '*.*')],
-            initialfile=f'{self.host}_output_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt',
-            parent=self.top
-        )
-        
-        if not filename:
-            return
-        
-        try:
-            with open(filename, 'w') as f:
-                f.write(self.output_text.get('1.0', 'end'))
-            
-            messagebox.showinfo('Save', f'Output saved to:\n{filename}', parent=self.top)
-        except Exception as e:
-            messagebox.showerror('Save Error', str(e), parent=self.top)
-    
-    def copy_output(self):
-        """Copy output to clipboard"""
-        output = self.output_text.get('1.0', 'end')
-        self.top.clipboard_clear()
-        self.top.clipboard_append(output)
-        self.info_label.config(text='Output copied to clipboard')
-    
-    def export_history(self, host, history_output):
-        """Export history to file"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension='.txt',
-            filetypes=[('Text files', '*.txt'), ('All files', '*.*')],
-            initialfile=f'{host}_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt',
-            parent=self.top
-        )
-        
-        if not filename:
-            return
-        
-        try:
-            with open(filename, 'w') as f:
-                f.write(f"Unix Command History - {host}\n")
-                f.write(f"Retrieved: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write("=" * 80 + "\n\n")
-                f.write(history_output)
-            
-            messagebox.showinfo('Export', f'History exported to:\n{filename}', parent=self.top)
-        except Exception as e:
-            messagebox.showerror('Export Error', str(e), parent=self.top)
-class ServerHistoryDialog:
-    """Dialog for viewing server history like Unix history command"""
-    def __init__(self, master, title, server_history):
-        self.top = tk.Toplevel(master)
-        self.top.title(f"Server History - {title}")
-        self.top.geometry('1000x700')
-        
-        frm = ttk.Frame(self.top, padding=15)
-        frm.pack(fill='both', expand=True)
-        frm.grid_rowconfigure(1, weight=1)
-        frm.grid_columnconfigure(0, weight=1)
-        
-        # Header
-        header = ttk.Frame(frm)
-        header.grid(row=0, column=0, sticky='we', pady=(0, 10))
-        
-        ttk.Label(header, text=f'📜 Server History: {title}', 
-                 font=('Segoe UI', 14, 'bold')).pack(side='left')
-        
-        # Export button
-        ttk.Button(header, text='💾 Export', 
-                  command=lambda: self.export_history(server_history)).pack(side='right', padx=5)
-        ttk.Button(header, text='🔄 Refresh', 
-                  command=lambda: self.refresh_history(server_history)).pack(side='right', padx=5)
-        
-        # Tree with history
-        tree_frame = ttk.Frame(frm, relief='sunken', borderwidth=1)
-        tree_frame.grid(row=1, column=0, sticky='nswe')
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
-        
-        cols = ('id', 'timestamp', 'server', 'type', 'message')
-        self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
-        
-        self.tree.heading('id', text='#')
-        self.tree.heading('timestamp', text='Timestamp')
-        self.tree.heading('server', text='Server')
-        self.tree.heading('type', text='Type')
-        self.tree.heading('message', text='Event')
-        
-        self.tree.column('id', width=50, stretch=False)
-        self.tree.column('timestamp', width=150, stretch=False)
-        self.tree.column('server', width=150, stretch=False)
-        self.tree.column('type', width=100, stretch=False)
-        self.tree.column('message', width=500, stretch=True)
-        
-        # Add data - sorted by timestamp
-        all_events = []
-        for host, events in server_history.items():
-            for event in events:
-                all_events.append((host, event))
-        
-        # Sort by timestamp (newest first)
-        all_events.sort(key=lambda x: x[1]['timestamp'], reverse=True)
-        
-        # Add to tree with colors
-        for idx, (host, event) in enumerate(all_events, 1):
-            event_type = event['type']
-            timestamp = event['timestamp'][:19]  # Remove microseconds
-            message = event['message']
-            
-            # Color code by type
-            if event_type == 'scan':
-                tags = ('scan',)
-            elif event_type == 'error':
-                tags = ('error',)
-            elif event_type == 'status_change':
-                if '🟢' in message or 'UP' in message:
-                    tags = ('up',)
-                else:
-                    tags = ('down',)
-            else:
-                tags = ()
-            
-            self.tree.insert('', 'end', values=(
-                idx, timestamp, host, event_type.upper(), message
-            ), tags=tags)
-        
-        # Configure tags
-        self.tree.tag_configure('scan', foreground='#0078d4')
-        self.tree.tag_configure('up', foreground='#28a745', font=('Segoe UI', 9, 'bold'))
-        self.tree.tag_configure('down', foreground='#dc3545', font=('Segoe UI', 9, 'bold'))
-        self.tree.tag_configure('error', foreground='#dc3545', background='#f8d7da')
-        
-        self.tree.grid(row=0, column=0, sticky='nswe')
-        
-        # Scrollbars
-        vsb = ttk.Scrollbar(tree_frame, orient='vertical', command=self.tree.yview)
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb = ttk.Scrollbar(tree_frame, orient='horizontal', command=self.tree.xview)
-        hsb.grid(row=1, column=0, sticky='we')
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        # Stats
-        stats_frame = ttk.Frame(frm)
-        stats_frame.grid(row=2, column=0, sticky='we', pady=(10, 0))
-        
-        total_events = len(all_events)
-        servers_count = len(server_history)
-        scan_count = sum(1 for _, e in all_events if e['type'] == 'scan')
-        error_count = sum(1 for _, e in all_events if e['type'] == 'error')
-        
-        
-        stats_text = f"Total Events: {total_events}  |  Servers: {servers_count}  |  Scans: {scan_count}  |  Errors: {error_count}"
-        ttk.Label(stats_frame, text=stats_text, font=('Segoe UI', 10)).pack(side='left')
-        
-        # Close button
-        ttk.Button(frm, text='Close', command=self.top.destroy, 
-                  width=15).grid(row=3, column=0, pady=(10, 0))
-        
-        self.top.transient(master)
-        self.server_history = server_history
-    
-    def refresh_history(self, server_history):
-        """Refresh the history display"""
-        # Clear and reload
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        
-        # Reload data
-        all_events = []
-        for host, events in server_history.items():
-            for event in events:
-                all_events.append((host, event))
-        
-        all_events.sort(key=lambda x: x[1]['timestamp'], reverse=True)
-        
-        for idx, (host, event) in enumerate(all_events, 1):
-            event_type = event['type']
-            timestamp = event['timestamp'][:19]
-            message = event['message']
-            
-            if event_type == 'scan':
-                tags = ('scan',)
-            elif event_type == 'error':
-                tags = ('error',)
-            elif event_type == 'status_change':
-                tags = ('up',) if 'UP' in message else ('down',)
-            else:
-                tags = ()
-            
-            self.tree.insert('', 'end', values=(
-                idx, timestamp, host, event_type.upper(), message
-            ), tags=tags)
-    
-    def export_history(self, server_history):
-        """Export history to file"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension='.txt',
-            filetypes=[('Text files', '*.txt'), ('JSON files', '*.json'), ('All files', '*.*')],
-            initialfile=f'server_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
-        )
-        
-        if not filename:
-            return
-        
-        try:
-            all_events = []
-            for host, events in server_history.items():
-                for event in events:
-                    all_events.append((host, event))
-            
-            all_events.sort(key=lambda x: x[1]['timestamp'], reverse=True)
-            
-            if filename.endswith('.json'):
-                # Export as JSON
-                import json
-                export_data = {
-                    'export_time': datetime.now().isoformat(),
-                    'servers': dict(server_history)
-                }
-                with open(filename, 'w') as f:
-                    json.dump(export_data, f, indent=2)
-            else:
-                # Export as text (like Unix history)
-                with open(filename, 'w') as f:
-                    f.write(f"PortiX Server History\n")
-                    f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write("=" * 80 + "\n\n")
-                    
-                    for idx, (host, event) in enumerate(all_events, 1):
-                        f.write(f"{idx:4d}  {event['timestamp'][:19]}  [{host}]  {event['type'].upper()}\n")
-                        f.write(f"      {event['message']}\n")
-                        if event.get('details'):
-                            f.write(f"      Details: {event['details']}\n")
-                        f.write("\n")
-            
-            messagebox.showinfo('Export', f'History exported to:\n{filename}')
-        except Exception as e:
-            messagebox.showerror('Export Error', str(e))
 
-class HistoryDialog:
-    """Dialog for viewing service history"""
-    def __init__(self, master, title, history_entries):
+    def _log_out(self, text, color):
+        self.out_text.config(state="normal")
+        tag = f"c_{color.replace('#', '')}"
+        self.out_text.tag_configure(tag, foreground=color)
+        self.out_text.insert("end", text, tag)
+        self.out_text.see("end")
+        self.out_text.config(state="disabled")
+
+
+# ── Server Events Dialog ──────────────────────────────────────────────────────
+class ServerEventsDialog(_ThemedDialog):
+    def __init__(self, master, server_history, theme=None):
+        self.theme = theme or THEMES["light"]
         self.top = tk.Toplevel(master)
-        self.top.title(f"History - {title}")
-        self.top.geometry('900x600')
-        
-        frm = ttk.Frame(self.top, padding=15)
-        frm.pack(fill='both', expand=True)
+        self.top.title("Server Event Log")
+        self.top.geometry("1000x620")
+        self.top.configure(bg=self.theme["bg"])
+        self._build(server_history)
+        self.top.transient(master)
+
+    def _build(self, server_history):
+        t = self.theme
+        frm = ttk.Frame(self.top, padding=16)
+        frm.pack(fill="both", expand=True)
         frm.grid_rowconfigure(1, weight=1)
         frm.grid_columnconfigure(0, weight=1)
-        
-        # Header
-        ttk.Label(frm, text=f'📈 Service History: {title}', 
-                 font=('Segoe UI', 14, 'bold')).grid(
-            row=0, column=0, sticky='w', pady=(0, 10))
-        
-        # Tree
-        tree_frame = ttk.Frame(frm, relief='sunken', borderwidth=1)
-        tree_frame.grid(row=1, column=0, sticky='nswe')
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
-        
-        cols = ('timestamp', 'status', 'response_time', 'status_code', 'summary')
-        tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
-        
-        tree.heading('timestamp', text='Timestamp')
-        tree.heading('status', text='Status')
-        tree.heading('response_time', text='Response Time')
-        tree.heading('status_code', text='HTTP Code')
-        tree.heading('summary', text='Details')
-        
-        tree.column('timestamp', width=150, stretch=False)
-        tree.column('status', width=80, stretch=False)
-        tree.column('response_time', width=100, stretch=False)
-        tree.column('status_code', width=80, stretch=False)
-        tree.column('summary', width=400, stretch=True)
-        
-        # Add data
-        for entry in sorted(history_entries, key=lambda x: x['timestamp'], reverse=True):
-            status = '🟢 OK' if entry['ok'] else '🔴 FAIL'
-            rt = f"{entry.get('response_time', 0):.0f}ms" if entry.get('response_time') else 'N/A'
-            ts = entry['timestamp'][:19]
-            code = entry.get('status_code', 'N/A')
-            
-            iid = tree.insert('', 'end', values=(
-                ts, status, rt, code, entry.get('summary', '')
-            ))
-            
-            # Color code
-            if entry['ok']:
-                tree.item(iid, tags=('ok',))
-            else:
-                tree.item(iid, tags=('fail',))
-        
-        tree.tag_configure('ok', background='#d4edda')
-        tree.tag_configure('fail', background='#f8d7da')
-        
-        tree.grid(row=0, column=0, sticky='nswe')
-        
-        # Scrollbar
-        vsb = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
-        vsb.grid(row=0, column=1, sticky='ns')
+
+        ttk.Label(frm, text="Server Event Log",
+                  font=("Segoe UI", 14, "bold")).grid(row=0, sticky="w", pady=(0, 10))
+
+        tw = tk.Frame(frm, bg=t["border"])
+        tw.grid(row=1, sticky="nswe")
+        tw.grid_rowconfigure(0, weight=1)
+        tw.grid_columnconfigure(0, weight=1)
+        cols = ("id", "timestamp", "server", "type", "message")
+        tree = ttk.Treeview(tw, columns=cols, show="headings")
+        for c, txt, w, s in [("#", "id", 50, False), ("Timestamp", "timestamp", 160, False),
+                               ("Server", "server", 150, False), ("Type", "type", 100, False),
+                               ("Event", "message", 480, True)]:
+            tree.heading(txt, text=c)
+            tree.column(txt, width=w, stretch=s)
+
+        all_events = sorted(
+            [(h, e) for h, evs in server_history.items() for e in evs],
+            key=lambda x: x[1]["timestamp"], reverse=True)
+        for idx, (host, ev) in enumerate(all_events, 1):
+            et = ev["type"]
+            tag = "scan" if et == "scan" else ("err" if et == "error" else ())
+            tree.insert("", "end",
+                        values=(idx, ev["timestamp"][:19], host,
+                                et.upper(), ev["message"]),
+                        tags=(tag,) if tag else ())
+        tree.tag_configure("scan", foreground=t["accent"])
+        tree.tag_configure("err",  foreground=t["danger"], background=t["danger_bg"])
+        tree.grid(row=0, column=0, sticky="nswe", padx=1, pady=1)
+        vsb = ttk.Scrollbar(tw, orient="vertical", command=tree.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
         tree.configure(yscrollcommand=vsb.set)
-        
-        # Stats
-        total = len(history_entries)
-        success = sum(1 for e in history_entries if e['ok'])
-        fail = total - success
-        uptime_pct = (success / total * 100) if total > 0 else 0
-        
-        stats_frame = ttk.Frame(frm)
-        stats_frame.grid(row=2, column=0, sticky='we', pady=(10, 0))
-        
-        stats_text = f"Total Checks: {total}  |  Success: {success}  |  Failed: {fail}  |  Uptime: {uptime_pct:.1f}%"
-        ttk.Label(stats_frame, text=stats_text, font=('Segoe UI', 10)).pack(side='left')
-        
-        # Close button
-        ttk.Button(frm, text='Close', command=self.top.destroy, 
-                  width=15).grid(row=3, column=0, pady=(10, 0))
-        
+
+        footer = ttk.Frame(frm)
+        footer.grid(row=2, sticky="we", pady=(10, 0))
+        ttk.Label(footer,
+                  text=f"{len(all_events)} events across {len(server_history)} servers",
+                  style="Muted.TLabel").pack(side="left")
+        ttk.Button(footer, text="Close", command=self.top.destroy).pack(side="right")
+
+
+# ── History Dialog ────────────────────────────────────────────────────────────
+class HistoryDialog(_ThemedDialog):
+    def __init__(self, master, title, history_entries, theme=None):
+        self.theme = theme or THEMES["light"]
+        self.top = tk.Toplevel(master)
+        self.top.title(f"History — {title}")
+        self.top.geometry("880x580")
+        self.top.configure(bg=self.theme["bg"])
+        self._build(title, history_entries)
         self.top.transient(master)
 
-# ============== Main ==============
+    def _build(self, title, entries):
+        t = self.theme
+        frm = ttk.Frame(self.top, padding=16)
+        frm.pack(fill="both", expand=True)
+        frm.grid_rowconfigure(1, weight=1)
+        frm.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(frm, text=f"History — {title}",
+                  font=("Segoe UI", 13, "bold")).grid(row=0, sticky="w", pady=(0, 10))
+
+        tw = tk.Frame(frm, bg=t["border"])
+        tw.grid(row=1, sticky="nswe")
+        tw.grid_rowconfigure(0, weight=1)
+        tw.grid_columnconfigure(0, weight=1)
+
+        cols = ("timestamp", "status", "response_time", "code", "summary")
+        tree = ttk.Treeview(tw, columns=cols, show="headings")
+        for c, txt, w, s in [
+            ("timestamp", "Timestamp", 160, False),
+            ("status", "Status", 90, False),
+            ("response_time", "Response", 100, False),
+            ("code", "HTTP", 70, False),
+            ("summary", "Details", 380, True),
+        ]:
+            tree.heading(c, text=txt)
+            tree.column(c, width=w, stretch=s)
+
+        for e in sorted(entries, key=lambda x: x["timestamp"], reverse=True):
+            status = "● OK" if e["ok"] else "○ FAIL"
+            rt = f"{e.get('response_time', 0):.0f} ms" if e.get("response_time") else "—"
+            iid = tree.insert("", "end", values=(
+                e["timestamp"][:19], status, rt,
+                e.get("status_code", "—"), e.get("summary", "")))
+            tree.item(iid, tags=("ok",) if e["ok"] else ("fail",))
+
+        tree.tag_configure("ok",   background=t["success_bg"], foreground=t["success"])
+        tree.tag_configure("fail", background=t["danger_bg"],  foreground=t["danger"])
+        tree.grid(row=0, column=0, sticky="nswe", padx=1, pady=1)
+        vsb = ttk.Scrollbar(tw, orient="vertical", command=tree.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        tree.configure(yscrollcommand=vsb.set)
+
+        total   = len(entries)
+        success = sum(1 for e in entries if e["ok"])
+        footer = ttk.Frame(frm)
+        footer.grid(row=2, sticky="we", pady=(10, 0))
+        uptime = success/total*100 if total else 0
+        ttk.Label(footer,
+                  text=f"{total} checks · {success} ok · {uptime:.1f}% uptime",
+                  style="Muted.TLabel").pack(side="left")
+        ttk.Button(footer, text="Close", command=self.top.destroy).pack(side="right")
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 def main():
-    """Main entry point"""
     root = tk.Tk()
-    app = MonitorApp(root)
-    
-    # Keyboard shortcuts
-    root.bind('<F5>', lambda e: app.scan_selected_remote())
-    root.bind('<Control-F5>', lambda e: app.scan_all_targets())
-    root.bind('<Control-n>', lambda e: app.open_add_remote())
-    root.bind('<Control-space>', lambda e: app.toggle_polling())
-    root.bind('<Control-s>', lambda e: app.save_config())
-    root.bind('<Control-e>', lambda e: app.export_results())
-    root.bind('<Control-i>', lambda e: app.show_statistics())
-    root.bind('<Control-h>', lambda e: app.show_history())
-    root.bind('<Control-l>', lambda e: app.log_text.delete('1.0', 'end'))
-    root.bind('<Control-q>', lambda e: root.quit())
-    root.bind('<Delete>', lambda e: app.delete_selected())
-    root.bind('<F1>', lambda e: app.show_shortcuts())
-    
-    # Set minimum window size
+    app = PortixApp(root)
+
+    binds = [
+        ("<F5>",           lambda e: app.scan_selected()),
+        ("<Control-F5>",   lambda e: app.scan_all()),
+        ("<Control-n>",    lambda e: app.open_add_remote()),
+        ("<Control-space>",lambda e: app.toggle_polling()),
+        ("<Control-s>",    lambda e: app.save_config()),
+        ("<Control-e>",    lambda e: app.export_results()),
+        ("<Control-t>",    lambda e: app.toggle_theme()),
+        ("<Control-i>",    lambda e: app.show_statistics()),
+        ("<Control-h>",    lambda e: app.show_history()),
+        ("<Control-r>",    lambda e: app.show_server_event_log()),
+        ("<Control-q>",    lambda e: root.quit()),
+        ("<Delete>",       lambda e: app._delete_selected()),
+        ("<F1>",           lambda e: app.show_shortcuts()),
+    ]
+    for key, cmd in binds:
+        root.bind(key, cmd)
+
     root.update()
-    root.minsize(root.winfo_width(), root.winfo_height())
-    
-    # Center on screen
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    x = (screen_width - 1600) // 2
-    y = (screen_height - 900) // 2
-    root.geometry(f'1600x900+{x}+{y}')
-    
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"1480x860+{max((sw-1480)//2,0)}+{max((sh-860)//2,0)}")
     root.mainloop()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

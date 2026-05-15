@@ -1,0 +1,204 @@
+Unix Command History - 172.22.15.72
+Retrieved: 2026-02-11 16:14:01
+================================================================================
+
+kill -9 1464767
+podman exec -it infra_consul_1 sh
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/devops/microservices/domains/kit-enrolement/jars/hub-service-1.0.0.jar --server.port=8002 --spring.profiles.active=recette  >> /home/userdev/devops/microservices/domains/kit-enrolement/logs/nohub.log 2>&1 &
+ps aux | grep client-com
+kill -9 1665971
+lsof -i :8092
+kill -9 185908
+nohub java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-ref-client-compte/abb-api-ref-swift-emission-0.0.1-SNAPSHOT.jar --spring.profiles.active=recette --server.port=8092
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-ref-client-compte/abb-api-ref-swift-emission-0.0.1-SNAPSHOT.jar --spring.profiles.active=recette --server.port=8092
+
+lsof -i :8092
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-ref-client-compte/abb-api-ref-client-compte-0.0.1-SNAPSHOT.jar --spring.profiles.active=recette --server.port=8092 &
+lsof -i :8092
+ps -ef | grep java | grep app-api-iso20022-0.0.5-prod.jar
+kill -9 3582202
+cd /home/userdev/apps/abb-api-iso20022/artifacts/
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-iso20022/artifacts/app-api-iso20022-0.0.3-prod.jar --spring.profiles.active=recette --spring.config.additional-location=file:/home/userdev/apps/abb-api-iso20022/config/ > /home/userdev/apps/abb-api-iso20022/logs/iso.log 2>&1 &
+ps -ef | grep java | grep app-api-iso20022-0.0.5-prod.jar
+clear 
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-iso20022/artifacts/app-api-iso20022-0.0.8-prod.jar --spring.profiles.active=recette --spring.config.additional-location=file:/home/userdev/apps/abb-api-iso20022/config/ > /home/userdev/apps/abb-api-iso20022/logs/iso.log 2>&1 &
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-iso20022/artifacts/app-api-iso20022-0.0.8-prod.jar --spring.profiles.active=recette --spring.config.additional-location=file:/home/userdev/apps/abb-api-iso20022/config/ &
+clear 
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-iso20022/artifacts/app-api-iso20022-0.0.8-prod.jar --spring.profiles.active=recette --spring.config.additional-location=file:/home/userdev/apps/abb-api-iso20022/config/ &
+lsof -i :8092
+kill -9 1669346
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-ref-client-compte/abb-api-ref-client-compte-0.0.1-SNAPSHOT.jar --spring.profiles.active=recette --server.port=8092 &
+lsof -i :8002
+kill -9 1479962
+podman exec -it infra_consul_1 sh
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/devops/microservices/domains/kit-enrolement/jars/hub-service-1.0.0.jar --server.port=8002 --spring.profiles.active=recette  >> /home/userdev/devops/microservices/domains/kit-enrolement/logs/nohub.log 2>&1 &
+lsof -i :8002
+losf -i :8002
+lsof -i :8002
+kill -9 2315660
+podman exec -it infra_consul_1 sh
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/devops/microservices/domains/kit-enrolement/jars/hub-service-1.0.0.jar --server.port=8002 --spring.profiles.active=recette  >> /home/userdev/devops/microservices/domains/kit-enrolement/logs/nohub.log 2>&1 &
+lsof -i :8002
+kill -9 2359790
+podman exec -it infra_consul_1 sh
+lsof -i :8003
+kill -9 1465524
+podman exec -it infra_consul_1 sh
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/devops/microservices/domains/kit-enrolement/jars/hub-service-1.0.0.jar --server.port=8002 --spring.profiles.active=recette  >> /home/userdev/devops/microservices/domains/kit-enrolement/logs/nohub.log 2>&1 &
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/devops/microservices/domains/kit-enrolement/jars/ccp-service-1.0.0.jar --server.port=8003 --spring.profiles.active=recette  >> /home/userdev/devops/microservices/domains/kit-enrolement/logs/ccp.log 2>&1 &
+podman exec -it infra_consul_1 sh
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/devops/microservices/domains/kit-enrolement/jars/hub-service-1.0.0.jar --server.port=8002 --spring.profiles.active=recette  >> /home/userdev/devops/microservices/domains/kit-enrolement/logs/nohub.log 2>&1 &
+cd /home/userdev/batches/abb-flux-auto-suppression-cheq-certifs-int/bin/
+ls
+nohup sh AUTOSUPCHEQCERTUNIX.sh SUPPRESSION_CHEQUES_CERTIFS_EXPIRES & 
+grep aux | java 
+ps  aux |grep  java 
+ps  aux |grep  java  supp
+ps  aux |grep  java  sup
+ps  aux |grep   sup
+ps  aux |grep   supp
+clear
+ps  aux |grep   supp
+kill -9 3580291
+ps  aux |grep   supp
+clear
+cd  /home/userdev/apps/auto-suppression-cheq-certifs/artifacts/
+nohup java --enable-preview -jar /home/userdev/apps/auto-suppression-cheq-certifs/artifacts/abb-api-supp-cheques-certifies-0.0.1-SNAPSHOT.jar -Xms256m -Xmx256m --server.port=8100 --spring.profiles.active=dev&
+cd /home/userdev/batches/
+rm -R abb-flux-prlv-virement-int.old
+tar xvf abb-flux-prlv-virement-int-0.0.1-SNAPSHOT-bin.tar.gz
+cp -r /home/userdev/batches/abb-flux-prlv-virement-int.old/data/ /home/userdev/batches/abb-flux-prlv-virement-int/data/
+cd /home/userdev/batches/abb-flux-prlv-virement-int/bin/
+ls
+chmod +x PRLVVIREMENTSOFACUNIX.sh
+nohup sh PRLVVIREMENTSOFACUNIX.sh PRLV_WAFA_ASSURANCE & 
+nohup sh PRLVVIREMENTSOFACUNIX.sh VIREMENT_BANQUE_ASS & 
+clear
+nohup sh PRLVVIREMENTSOFACUNIX.sh VIREMENT_BANQUE_ASS & 
+lsof -i :8002
+kill -9 2610297
+podman exec -it infra_consul_1 sh
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/devops/microservices/domains/kit-enrolement/jars/hub-service-1.0.0.jar --server.port=8002 --spring.profiles.active=recette  >> /home/userdev/devops/microservices/domains/kit-enrolement/logs/nohub.log 2>&1 &
+df -h
+sudo journalctl --vacuum-time=7d
+sudo du -sh /* 2>/dev/null | sort -h
+sudo du -sh /var/log/*
+podman exec -it infra_consul_1 sh
+lsof -i :8002
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/devops/microservices/domains/kit-enrolement/jars/hub-service-1.0.0.jar --server.port=8002 --spring.profiles.active=recette  >> /home/userdev/devops/microservices/domains/kit-enrolement/logs/nohub.log 2>&1 &
+ps grep | iso
+ps  grep | iso
+ps  aux |grep   iso
+ps  aux |grep app-api-iso
+lsof -i :8085
+cd /home/userdev/batches/
+rm -R abb-flux-prlv-virement-int.old
+tar xvf abb-flux-prlv-virement-int-0.0.1-SNAPSHOT-bin.tar.gz
+cp -r /home/userdev/batches/abb-flux-prlv-virement-int.old/data/  /home/userdev/batches/abb-flux-prlv-virement-int
+nohup sh PRLVVIREMENTSOFACUNIX.sh VIREMENT_BANQUE_ASS & 
+pwd
+cd /home/userdev/batches/abb-flux-prlv-virement-int/bin/
+ls
+chmod +x PRLVVIREMENTSOFACUNIX.sh
+nohup sh PRLVVIREMENTSOFACUNIX.sh VIREMENT_BANQUE_ASS & 
+cd ..
+cd /.
+pwd
+cd /home/userdev/batches/
+ls -ltr
+tar xvf abb-flux-prlv-virement-int-0.0.1-SNAPSHOT-bin.tar.gz
+clear
+cp -r /home/userdev/batches/abb-flux-prlv-virement-int.old/data/ /home/userdev/batches/abb-flux-prlv-virement-int
+pwd
+cd /home/userdev/batches/abb-flux-prlv-virement-int/bin/
+ls
+chmod +x PRLVVIREMENTSOFACUNIX.sh
+ls
+nohup sh PRLVVIREMENTSOFACUNIX.sh VIREMENT_BANQUE_ASS &
+history 
+cd /home/userdev/
+ll -ltr
+ll -ltrm
+ll -ltrh
+pwd
+cd ..
+ll
+cd admin/
+ll -ltrh
+cd tfsdeploy/
+ll
+exit
+cd /home/userdev/batches/abb-flux-auto-suppression-cheq-certifs-int/bin/
+ls
+nohup sh AUTOSUPCHEQCERTUNIX.sh SUPPRESSION_CHEQUES_CERTIFS_EXPIRES & 
+cd /home/userdev/batches/
+tar xvf abb-flux-auto-suppression-cheq-certifs-int-0.0.1-SNAPSHOT-bin.tar.gz
+cd /home/userdev/batches/abb-flux-auto-suppression-cheq-certifs-int/bin/
+ls
+chmod +x AUTOSUPCHEQCERTUNIX.sh
+ls
+nohup sh AUTOSUPCHEQCERTUNIX.sh SUPPRESSION_CHEQUES_CERTIFS_EXPIRES & 
+pwd
+ls
+nohup sh AUTOSUPCHEQCERTUNIX.sh SUPPRESSION_CHEQUES_CERTIFS_EXPIRES & 
+cd /home/userdev/batches/
+rm -R abb-flux-auto-suppression-cheq-certifs-int
+clear
+tar xvf abb-flux-auto-suppression-cheq-certifs-int-0.0.1-SNAPSHOT-bin.tar.gz
+cd /home/userdev/batches/abb-flux-auto-suppression-cheq-certifs-int/bin/
+ls
+chmod +x AUTOSUPCHEQCERTUNIX.sh
+nohup sh AUTOSUPCHEQCERTUNIX.sh SUPPRESSION_CHEQUES_CERTIFS_EXPIRES & 
+ps -ef | grep java
+cd /home/userdev/apps/abb-api-iso20022/artifacts/
+nohup java --enable-preview -jar /home/userdev/apps/abb-api-iso20022/artifacts/app-api-iso20022-0.0.9-prod.jar -Xms256m -Xmx256m --server.port=8111--spring.profiles.active=dev&
+nohup java --enable-preview -jar /home/userdev/apps/abb-api-iso20022/artifacts/app-api-iso20022-0.0.9-prod.jar -Xms256m -Xmx256m --server.port=8111
+ps aux | grep pelerinage
+losf -i :8083
+lsof -i :8083
+kill -9 3381448
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette &
+java --enable-preview -jar target/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --spring.profiles.active=recette
+java --enable-preview -jar abb-api-pelerinage-0.0.1-SNAPSHOT.jar --spring.profiles.active=recette
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette &
+clear
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette &
+clear
+java --enable-preview -jar target/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --spring.profiles.active=recette --spring.jpa.properties.hibernate.scanner.archive.explicit_class_names=com.abb.pelerinage.entity.SgcTypeOperation
+java --enable-preview -jar abb-api-pelerinage-0.0.1-SNAPSHOT.jar --spring.profiles.active=recette --spring.jpa.properties.hibernate.scanner.archive.explicit_class_names=com.abb.pelerinage.entity.SgcTypeOperation
+clear
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette --spring.jpa.properties.hibernate.scanner.archive.explicit_class_names=com.abb.pelerinage.entity.SgcTypeOperation &
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette --spring.jpa.show-sql=false --spring.jpa.properties.hibernate.archive.autodetection=none &
+/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette --spring.jpa.properties.hibernate.scanner.archive.explicit_class_names=com.abb.pelerinage.entity.SgcTypeOperation &
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette --spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.domain.EntityScanAutoConfiguration &
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette &
+CLEAR
+clear
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette &
+clear
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette &
+lsof -i :8083
+kill -9 3237967
+lsof -i :8083
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette &
+clear
+lsof -i :8083
+java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette &
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-pelerinage/artifacts/abb-api-pelerinage-0.0.1-SNAPSHOT.jar --server.port=8083 --spring.profiles.active=recette > /home/userdev/apps/abb-api-pelerinage/logs/app.log 2>&1 &
+ps aux | swif
+ps aux | grep swif
+lsof -i :8082
+ps aux | grep emis
+lsof -i :8093
+ps aux | gres 8093
+ps aux | grep 8093
+ps aux | gres 8093
+lsof -i :8093
+kill -9 1886266
+nohup java --enable-preview -Xms256m -Xmx256m   -jar /home/userdev/apps/abb-api-ccp-transfert-international/abb-api-ccp-transfert-international-0.0.1-SNAPSHOT.jar   --server.port=8093   --spring.profiles.active=recette   > abb-api.log 2>&1 &
+lsof -i :8093
+ps aux |grep abb-api-sw
+lsof -i :8082
+kill -9 3630581
+nohup java --enable-preview -Xms256m -Xmx256m -jar /home/userdev/apps/abb-api-swift/artifacts/abb-api-swift-0.0.1-SNAPSHOT.jar --server.port=8082 --spring.profiles.active=recette > /home/userdev/apps/abb-api-swift/logs/app.log 2>&1 &
+lsof -i :8082

@@ -1,0 +1,20 @@
+{
+  "CCP_TRT": {
+    "host": "172.22.15.39",
+    "port": "9024",
+    "database": "ccp",
+    "server": "BANK_CC_TRT",
+    "username": "userrec",
+    "password": "Util@Rec@2019",
+    "color": "blue"
+  },
+  "CCP_REC": {
+    "host": "172.22.15.234",
+    "port": "9027",
+    "database": "ccp",
+    "server": "BANK_CC_TRT",
+    "username": "cctrtdev",
+    "password": "TrtB10o$RdeVBa",
+    "color": "blue"
+  }
+}
